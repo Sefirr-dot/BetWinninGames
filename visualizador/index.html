@@ -1319,9 +1319,22 @@ select.sort-select:focus { border-color: #3d6090; }
 <script src="data/backtest_data.js"></script>
 <script>
 // ── STATE ──
-let activeDate = DATES[0];
-let activeLeague = "ALL";
-let sortMode = "stars";
+function _loadState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('bwg_state') || '{}');
+    return s;
+  } catch { return {}; }
+}
+function saveState() {
+  try {
+    localStorage.setItem('bwg_state', JSON.stringify({ activeDate, activeLeague, sortMode }));
+  } catch {}
+}
+const _saved = _loadState();
+let activeDate   = (DATES.includes(_saved.activeDate) || ['ALL','BEST','VALUE','TRACK','BACK','WIN','BETNOW'].includes(_saved.activeDate))
+                   ? _saved.activeDate : (DATES[0] || 'ALL');
+let activeLeague = _saved.activeLeague || "ALL";
+let sortMode     = _saved.sortMode     || "stars";
 let vbBankroll = 100;
 
 // ── DAY SCORE ──
@@ -1699,6 +1712,7 @@ function sortMatches(arr) {
 
 // ── MAIN RENDER ──
 function render() {
+  saveState();
   const bestBets = calcBestBets();
   buildDayNav();
   buildSidebar();
@@ -2955,7 +2969,9 @@ function renderReliabilityDiagram(picks) {
 }
 
 // ── INIT ──
-document.getElementById('sort-select').addEventListener('change', render);
+const _sortEl = document.getElementById('sort-select');
+if (_sortEl && sortMode) _sortEl.value = sortMode;
+_sortEl.addEventListener('change', () => { sortMode = _sortEl.value; render(); });
 render();
 </script>
 </body>
