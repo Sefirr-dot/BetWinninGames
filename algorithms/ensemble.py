@@ -118,13 +118,15 @@ def _confidence(
     h2h_pred: dict,
 ) -> float:
     """
-    Variance-based model confidence.
+    Full-distribution confidence score (v2).
 
-    Determines the consensus winner outcome, then measures how tightly
-    the sub-models agree on its probability. Low coefficient of variation
-    (CV) → high confidence.
+    Combines two signals:
+      1. Total variance across all three outcome probabilities (home/draw/away)
+         — captures disagreement in the entire distribution, not just the winner.
+      2. Consensus rate — fraction of models that agree on WHO wins.
+         Penalises splits like DC→home, Elo→draw, Form→away.
 
-    Range: 0.55 (models disagree) → 1.0 (all models assign same probability).
+    Range: 0.55 (high disagreement) → 1.0 (perfect consensus).
     """
     models = [d for d in (dc_pred, elo_pred, form_pred) if d]
     if h2h_pred.get("sufficient"):
@@ -133,24 +135,30 @@ def _confidence(
     if not models:
         return 0.5
 
-    def _winner_key(d):
+    n = len(models)
+
+    def _winner_key(d: dict) -> str:
         p = {"H": d.get("prob_home", 0), "D": d.get("prob_draw", 0), "A": d.get("prob_away", 0)}
         return max(p, key=p.get)
 
-    def _prob_for(d, key):
-        return {"H": d.get("prob_home", 0), "D": d.get("prob_draw", 0), "A": d.get("prob_away", 0)}[key]
+    # 1. Total variance across all 3 outcome distributions
+    total_var = 0.0
+    for key in ("prob_home", "prob_draw", "prob_away"):
+        probs  = [d.get(key, 0.0) for d in models]
+        mean_p = sum(probs) / n
+        total_var += sum((p - mean_p) ** 2 for p in probs) / n
 
-    top_key = Counter([_winner_key(d) for d in models]).most_common(1)[0][0]
-    probs = [_prob_for(d, top_key) for d in models]
-    mean_p = sum(probs) / len(probs)
-    if mean_p < 1e-9:
-        return 0.5
+    # Normalise: total_var ~0.05 is very high disagreement → spread_penalty = 1.0
+    spread_penalty = min(1.0, total_var / 0.05)
 
-    variance = sum((p - mean_p) ** 2 for p in probs) / len(probs)
-    cv = variance ** 0.5 / mean_p  # coefficient of variation
+    # 2. Consensus: fraction of models that predict the same winner
+    winners = [_winner_key(d) for d in models]
+    consensus_rate = Counter(winners).most_common(1)[0][1] / n
 
-    # cv=0 (perfect agreement) → 1.0; cv≥0.28 → 0.55
-    return max(0.55, min(1.0, 1.0 - 1.6 * cv))
+    # Combine: low variance + high consensus → high confidence
+    conf = consensus_rate * (1.0 - 0.45 * spread_penalty)
+
+    return max(0.55, min(1.0, conf))
 
 
 def _resolve_dc_params(dc_params: dict, league_code: str | None) -> dict:
@@ -391,6 +399,11 @@ def predict_match(
         stars = 2
     else:
         stars = 1
+
+    # Full-distribution confidence penalty: models predict different winners
+    # or show high spread → downgrade one star to avoid false high-confidence picks
+    if conf < 0.65:
+        stars = max(stars - 1, 1)
 
     return {
         "prob_home": ph,
