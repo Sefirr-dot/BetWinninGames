@@ -229,6 +229,72 @@ def _msg_valuebets(all_data: dict) -> str:
     return "\n".join(lines)
 
 
+def _msg_winiela(all_data: dict) -> str:
+    """Message: La Liga winiela — best pick per match (1/X/2/O25/BTTS)."""
+    _pick_label  = {'1': 'Victoria Local', 'X': 'Empate', '2': 'Victoria Visit.',
+                    'O25': 'Over 2.5', 'BTTS': 'Ambos marcan'}
+    _pick_emoji  = {'1': '🟢', 'X': '🟡', '2': '🔵', 'O25': '🔵', 'BTTS': '🟠'}
+
+    # Collect all PD matches sorted by date+time
+    pd_entries = []
+    for date_str in sorted(all_data):
+        for e in all_data[date_str].get("predictions", []):
+            if e["match_info"].get("_league_code") == "PD":
+                pd_entries.append(e)
+    pd_entries.sort(key=lambda e: e["match_info"].get("utcDate", ""))
+
+    if len(pd_entries) < 2:
+        return ""
+
+    lines = ["⚽ *Quiniela La Liga — selección automática*\n"]
+    combined_prob = 1.0
+    combined_odds = 1.0
+
+    for i, e in enumerate(pd_entries, 1):
+        pred = e["prediction"]
+        mi   = e["match_info"]
+        home = _short(mi.get("homeTeam", {}).get("shortName") or mi.get("homeTeam", {}).get("name", "?"))
+        away = _short(mi.get("awayTeam", {}).get("shortName") or mi.get("awayTeam", {}).get("name", "?"))
+        t    = mi.get("utcDate", "")[11:16] or "?"
+
+        p1  = pred.get("prob_home", 0) * 100
+        px  = pred.get("prob_draw", 0) * 100
+        p2  = pred.get("prob_away", 0) * 100
+        po  = pred.get("over25",    0) * 100
+        pb  = pred.get("btts_prob", 0) * 100
+
+        candidates = [
+            ("1",    p1,  pred.get("prob_home", 0)),
+            ("X",    px,  pred.get("prob_draw", 0)),
+            ("2",    p2,  pred.get("prob_away", 0)),
+        ]
+        if pred.get("over25", 0) >= 0.50:
+            candidates.append(("O25",  po, pred.get("over25",    0)))
+        if pred.get("btts_prob", 0) >= 0.50:
+            candidates.append(("BTTS", pb, pred.get("btts_prob", 0)))
+
+        best_pick, best_pct, best_prob = max(candidates, key=lambda c: c[1])
+        fair = round(1.0 / best_prob, 2) if best_prob > 0.01 else None
+        combined_prob *= best_prob
+        if fair:
+            combined_odds *= fair
+
+        emoji = _pick_emoji.get(best_pick, "")
+        label = _pick_label.get(best_pick, best_pick)
+        lines.append(
+            f"  *{i}.* `{home} vs {away}` {t}h\n"
+            f"      {emoji} *{best_pick}* — {label} ({best_pct:.0f}%)"
+            + (f" @{fair}" if fair else "")
+        )
+
+    cp = combined_prob * 100
+    cp_str = f"{cp:.2f}%" if cp >= 0.1 else f"{cp:.4f}%"
+    co_str = f"@{combined_odds:.1f}" if combined_odds < 100000 else f"@{combined_odds:.0e}"
+    lines.append(f"\n_Prob combinada: {cp_str}  {co_str}_")
+    lines.append("_Solo informativo · Apuesta con responsabilidad_")
+    return "\n".join(lines)
+
+
 def _msg_parlays(all_data: dict) -> list[str]:
     """Messages 3+: one message per parlay type."""
     entries = _all_entries(all_data)
@@ -306,6 +372,10 @@ def send_picks(all_data: dict, quiet: bool = False) -> bool:
     for text in _msg_parlays(all_data):
         if _send(text, quiet):
             sent += 1
+
+    # Msg 5 — Winiela La Liga
+    if _send(_msg_winiela(all_data), quiet):
+        sent += 1
 
     if not quiet and sent:
         print(f"  [telegram] {sent} mensaje(s) enviado(s) a chat {TELEGRAM_CHAT_ID}.")
