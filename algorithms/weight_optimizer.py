@@ -1,15 +1,17 @@
 """
 Ensemble weight optimizer.
 
-Uses resolved picks from picks_history.db to find the DC/Elo/Form weight
+Uses resolved picks from picks_history.db to find the DC/Elo weight
 combination that minimises the Brier score on historical data.
 
-Only the three main 1X2 models are optimised (Dixon-Coles, Elo, Form).
-H2H / BTTS / Corners weights remain at their config values.
+Form has been removed from the optimisation — backtest confirmed near-zero
+predictive value (3.4% weight), so its budget is now pre-allocated to DC/Elo.
+
+Only DC and Elo are optimised. H2H / BTTS / Corners weights remain at their
+config values.
 
 The optimised weights are stored at cache/model_weights.json and loaded by
-ensemble.py at import time, overriding config.MODEL_WEIGHTS for the three
-main models.
+ensemble.py at import time, overriding config.MODEL_WEIGHTS.
 """
 
 import json
@@ -29,15 +31,12 @@ _WEIGHTS_PATH = "cache/model_weights.json"
 
 def optimize_weights(resolved_picks: list[dict]) -> dict | None:
     """
-    Find DC/Elo/Form weights that minimise Brier score on resolved picks.
-
-    Parameters
-    ----------
-    resolved_picks : list of DB row dicts with sub_preds (JSON) and actual_result
+    Find DC/Elo weights that minimise Brier score on resolved picks.
+    Form is fixed at 0 (removed from blend).
 
     Returns
     -------
-    Full MODEL_WEIGHTS-compatible dict with optimised DC/Elo/Form values,
+    Full MODEL_WEIGHTS-compatible dict with optimised DC/Elo values,
     or None if not enough usable records.
     """
     records = []
@@ -50,10 +49,9 @@ def optimize_weights(resolved_picks: list[dict]) -> dict | None:
         except (TypeError, ValueError):
             continue
 
-        dc   = sub.get("dc")
-        elo  = sub.get("elo")
-        form = sub.get("form")
-        if not (dc and elo and form):
+        dc  = sub.get("dc")
+        elo = sub.get("elo")
+        if not (dc and elo):
             continue
 
         outcome = p.get("actual_result")
@@ -61,10 +59,9 @@ def optimize_weights(resolved_picks: list[dict]) -> dict | None:
             continue
 
         records.append({
-            "dc":   [dc.get("prob_home",   1/3), dc.get("prob_draw",   1/3), dc.get("prob_away",   1/3)],
-            "elo":  [elo.get("prob_home",  1/3), elo.get("prob_draw",  1/3), elo.get("prob_away",  1/3)],
-            "form": [form.get("prob_home", 1/3), form.get("prob_draw", 1/3), form.get("prob_away", 1/3)],
-            "y":    [
+            "dc":  [dc.get("prob_home",  1/3), dc.get("prob_draw",  1/3), dc.get("prob_away",  1/3)],
+            "elo": [elo.get("prob_home", 1/3), elo.get("prob_draw", 1/3), elo.get("prob_away", 1/3)],
+            "y":   [
                 1.0 if outcome == "home" else 0.0,
                 1.0 if outcome == "draw" else 0.0,
                 1.0 if outcome == "away" else 0.0,
@@ -74,45 +71,39 @@ def optimize_weights(resolved_picks: list[dict]) -> dict | None:
     if len(records) < WEIGHT_OPTIMIZER_MIN_SAMPLES:
         return None
 
-    dc_arr   = np.array([r["dc"]   for r in records])
-    elo_arr  = np.array([r["elo"]  for r in records])
-    form_arr = np.array([r["form"] for r in records])
-    y_arr    = np.array([r["y"]    for r in records])
+    dc_arr  = np.array([r["dc"]  for r in records])
+    elo_arr = np.array([r["elo"] for r in records])
+    y_arr   = np.array([r["y"]   for r in records])
 
     def brier(w):
-        w = np.abs(w)  # force non-negative
+        w = np.abs(w)
         w = w / w.sum()
-        blend = w[0] * dc_arr + w[1] * elo_arr + w[2] * form_arr
-        # Row-normalise
+        blend = w[0] * dc_arr + w[1] * elo_arr
         row_sums = blend.sum(axis=1, keepdims=True)
         row_sums = np.where(row_sums < 1e-9, 1.0, row_sums)
         blend /= row_sums
         return float(np.mean(np.sum((blend - y_arr) ** 2, axis=1)))
 
-    x0 = [
-        MODEL_WEIGHTS["dixon_coles"],
-        MODEL_WEIGHTS["elo"],
-        MODEL_WEIGHTS["form"],
-    ]
+    x0 = [MODEL_WEIGHTS["dixon_coles"], MODEL_WEIGHTS["elo"]]
     result = minimize(
         brier,
         x0=x0,
         method="L-BFGS-B",
-        bounds=[(0.05, 0.85), (0.05, 0.85), (0.05, 0.85)],
+        bounds=[(0.10, 0.90), (0.10, 0.90)],
         options={"maxiter": 300, "ftol": 1e-10},
     )
 
     w_opt = np.abs(result.x)
     w_opt /= w_opt.sum()
 
-    # Scale DC/Elo/Form to occupy (1 - other_weights) of total weight budget
+    # Scale DC/Elo to occupy (1 - other_weights) of total weight budget
     other = MODEL_WEIGHTS["h2h"] + MODEL_WEIGHTS["btts"] + MODEL_WEIGHTS["corners"]
     scale = 1.0 - other
 
     return {
         "dixon_coles": round(float(w_opt[0]) * scale, 4),
         "elo":         round(float(w_opt[1]) * scale, 4),
-        "form":        round(float(w_opt[2]) * scale, 4),
+        "form":        0.0,   # fixed at zero
         # keep the rest from config
         "h2h":     MODEL_WEIGHTS["h2h"],
         "btts":    MODEL_WEIGHTS["btts"],
@@ -138,8 +129,7 @@ def load_weights(path: str = _WEIGHTS_PATH) -> dict | None:
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        # Validate: must have the three main keys
-        if all(k in data for k in ("dixon_coles", "elo", "form")):
+        if all(k in data for k in ("dixon_coles", "elo")):
             return data
         return None
     except Exception:
