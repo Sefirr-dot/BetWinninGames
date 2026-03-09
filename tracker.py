@@ -488,6 +488,33 @@ def maybe_optimize_weights(resolved_picks: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Metrics JSON snapshot (for dynamic Kelly and other consumers)
+# ---------------------------------------------------------------------------
+
+_METRICS_JSON_PATH = "cache/tracker_metrics.json"
+
+def _save_metrics_json(metrics: dict) -> None:
+    """
+    Persist a lightweight snapshot of tracker metrics to cache/tracker_metrics.json.
+    Used by value_detector.py to load per-league ROI for dynamic Kelly sizing.
+    Only saves the fields that downstream consumers need (avoids serialising
+    the full bankroll_history list which can be large).
+    """
+    snapshot = {
+        "n_resolved":    metrics.get("n_resolved", 0),
+        "accuracy_1x2":  metrics.get("accuracy_1x2"),
+        "roi_flat":      metrics.get("roi_flat"),
+        "per_league":    metrics.get("per_league", {}),
+        "per_stars":     metrics.get("per_stars", {}),
+    }
+    try:
+        with open(_METRICS_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2)
+    except Exception as exc:
+        print(f"  [tracker] Warning: no se pudo guardar tracker_metrics.json: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -516,7 +543,11 @@ def run_tracker(quiet: bool = False, no_update: bool = False, no_report: bool = 
         maybe_optimize_weights(resolved)
         maybe_train_meta_learner(resolved)
 
-    # 4. Generate tracker_data.js
+    # 4. Save metrics snapshot for downstream consumers (e.g. dynamic Kelly)
+    if metrics:
+        _save_metrics_json(metrics)
+
+    # 5. Generate tracker_data.js
     if not no_report:
         path = generate_tracker_js(all_picks, metrics)
         if not quiet:

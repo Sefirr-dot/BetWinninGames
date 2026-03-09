@@ -14,6 +14,7 @@ CSV format (odds/YYYY-MM-DD.csv):
 """
 
 import csv
+import json
 import os
 import re
 import unicodedata
@@ -22,9 +23,45 @@ from config import (ODDS_DIR, VALUE_BET_EDGE_THRESHOLD, VALUE_BET_EDGE_STEP,
                     VALUE_BET_MIN_STARS, VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE,
                     VALUE_BET_MIN_ODDS)
 
+_TRACKER_METRICS_PATH = "cache/tracker_metrics.json"
+_KELLY_MIN_PICKS = 20   # minimum resolved picks per league to trust the ROI estimate
+
+
+def _load_league_kelly_multipliers() -> dict[str, float]:
+    """
+    Load per-league ROI from tracker_metrics.json and compute Kelly multipliers.
+
+    multiplier = max(0.30, min(1.50, 1.0 + league_roi))
+      - league ROI +10% → multiplier 1.10 (bet slightly more)
+      - league ROI  -5% → multiplier 0.95 (bet slightly less)
+      - league ROI -70% → multiplier 0.30 (floor — never stake zero)
+
+    Returns an empty dict when the file doesn't exist or has insufficient data,
+    which causes find_edges() to fall back to the default Kelly fraction.
+    """
+    try:
+        with open(_TRACKER_METRICS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+    multipliers: dict[str, float] = {}
+    per_league = data.get("per_league", {})
+    for lg, m in per_league.items():
+        if (m.get("n") or 0) < _KELLY_MIN_PICKS:
+            continue   # not enough data — skip this league
+        roi = m.get("roi") or 0.0
+        multipliers[lg] = max(0.30, min(1.50, 1.0 + roi))
+    return multipliers
+
+
+# Loaded once at import time; refreshed each tracker.py run via file write
+_LEAGUE_KELLY_MULT: dict[str, float] = _load_league_kelly_multipliers()
+
+
 # Adaptive fractional Kelly multipliers by (stars, edge) tier
 # Full Kelly only for highest-conviction bets; quarter Kelly as default
-def _kelly_fraction(edge: float, bk_odds: float, stars: int) -> float:
+def _kelly_fraction(edge: float, bk_odds: float, stars: int, league: str = "") -> float:
     """
     Tiered fractional Kelly staking.
 
@@ -34,6 +71,8 @@ def _kelly_fraction(edge: float, bk_odds: float, stars: int) -> float:
     Half  | >= 4  | >= 10%   | 0.5
     Qtr   | any   | any      | 0.25
 
+    Additionally scaled by the per-league ROI multiplier loaded from
+    cache/tracker_metrics.json (when >= _KELLY_MIN_PICKS resolved picks exist).
     Hard cap at 25% regardless of tier.
     """
     raw = edge / (bk_odds - 1)
@@ -43,7 +82,8 @@ def _kelly_fraction(edge: float, bk_odds: float, stars: int) -> float:
         mult = 0.5
     else:
         mult = 0.25
-    return min(raw * mult, 0.25)
+    league_mult = _LEAGUE_KELLY_MULT.get(league, 1.0)
+    return min(raw * mult * league_mult, 0.25)
 
 # Common prefixes/suffixes and article words stripped during normalization
 _PREFIXES = ("1. fc ", "fc ", "cf ", "rc ", "ac ", "sc ", "as ", "afc ",
@@ -252,7 +292,7 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
             edge = model_prob - implied_prob
 
             if edge >= effective_threshold:
-                kelly = _kelly_fraction(edge, bk_odds, stars)
+                kelly = _kelly_fraction(edge, bk_odds, stars, league)
                 value_bets.append({
                     "match":          f"{home_name} vs {away_name}",
                     "league":         mi.get("_league_code", ""),
