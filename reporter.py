@@ -417,6 +417,8 @@ def _prediction_to_dict(entry: dict, date_str: str, match_vbs: list[dict], stand
             "kelly":       round(vb["kelly_fraction"] * 100, 1),
             "modelProb":   round(vb["model_prob"] * 100, 1),
             "impliedProb": round(vb["implied_prob"] * 100, 1),
+            "sharpMoney":  bool(vb.get("sharp_money", False)),
+            "oddsMovement": round(vb["odds_movement"], 3) if vb.get("odds_movement") else None,
         }
         for vb in match_vbs
     ] or None
@@ -464,6 +466,7 @@ def _prediction_to_dict(entry: dict, date_str: str, match_vbs: list[dict], stand
         "scoreGrid":     score_grid,
         "aiNote":        pred.get("_ai_note"),
         "aiFactors":     pred.get("_ai_factors") or None,
+        "contextTags":   pred.get("_tags") or [],
     }
 
 

@@ -104,6 +104,12 @@ def predict_for_date(
     # Load odds CSV (already downloaded by fetch_window) for per-match market blend
     odds_map = value_detector.load_odds_csv(target_date)
 
+    # Compute CSV age for stale-odds detection in ensemble
+    import time as _time, os as _os
+    from config import ODDS_DIR as _ODDS_DIR
+    _csv_path = _os.path.join(_ODDS_DIR, f"{target_date}.csv")
+    odds_age_hours = (_time.time() - _os.path.getmtime(_csv_path)) / 3600 if _os.path.exists(_csv_path) else None
+
     predictions = []
     for match in matches:
         status = match.get("status", "")
@@ -126,6 +132,7 @@ def predict_for_date(
                 market_odds=match_odds,
                 elo_home_ratings=elo_home_ratings,
                 elo_away_ratings=elo_away_ratings,
+                odds_age_hours=odds_age_hours,
             )
             predictions.append({"match_info": match, "prediction": pred})
         except Exception as e:

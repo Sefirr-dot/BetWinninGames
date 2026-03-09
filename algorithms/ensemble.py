@@ -193,6 +193,7 @@ def predict_match(
     market_odds: dict | None = None,
     elo_home_ratings: dict | None = None,
     elo_away_ratings: dict | None = None,
+    odds_age_hours: float | None = None,
 ) -> dict:
     """
     Full prediction for one match.
@@ -345,7 +346,15 @@ def predict_match(
             mkt_sum = r1 + rx + r2
             if mkt_sum > 0:
                 mkt_ph, mkt_pd, mkt_pa = r1 / mkt_sum, rx / mkt_sum, r2 / mkt_sum
+                # Stale odds penalty: reduce blend weight when CSV is old.
+                # >6h old → 25% weight; 2-6h → 50%; <2h → full weight.
                 w = MARKET_BLEND_WEIGHT
+                if odds_age_hours is not None:
+                    if odds_age_hours > 6:
+                        w *= 0.25
+                        print(f"    [odds] Cuotas con {odds_age_hours:.1f}h de antigüedad — blend reducido al 25%.")
+                    elif odds_age_hours > 2:
+                        w *= 0.50
                 ph = (1 - w) * ph + w * mkt_ph
                 pd = (1 - w) * pd + w * mkt_pd
                 pa = (1 - w) * pa + w * mkt_pa
