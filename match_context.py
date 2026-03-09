@@ -63,11 +63,14 @@ def classify(
             tags.append("relegation_6ptr")
 
     # ── Form ────────────────────────────────────────────────────────────────
-    home_form = form_pred.get("home_form", 0.0)
-    away_form = form_pred.get("away_form", 0.0)
-    if home_form >= _FORM_STRONG:
+    # form_pred["home_form"] is the full compute() dict; use win_rate as score
+    home_form_d = form_pred.get("home_form") or {}
+    away_form_d = form_pred.get("away_form") or {}
+    home_wr = home_form_d.get("win_rate", 0.0) if isinstance(home_form_d, dict) else 0.0
+    away_wr = away_form_d.get("win_rate", 0.0) if isinstance(away_form_d, dict) else 0.0
+    if home_wr >= _FORM_STRONG:
         tags.append("home_in_form")
-    if away_form >= _FORM_STRONG:
+    if away_wr >= _FORM_STRONG:
         tags.append("away_in_form")
 
     # ── H2H dominance ───────────────────────────────────────────────────────
