@@ -364,7 +364,8 @@ def predict_match(
             pass
 
     # --- BTTS (Poisson exact using fatigue-adjusted lambda/mu) ---
-    btts_pred = btts.predict(home_id, away_id, all_matches, lambda_=lam, mu_=mu)
+    btts_pred = btts.predict(home_id, away_id, all_matches, lambda_=lam, mu_=mu,
+                             league_code=league_code)
     btts_prob = btts_pred["btts_prob"]
 
     # Slight H2H correction to BTTS when we have historical data
