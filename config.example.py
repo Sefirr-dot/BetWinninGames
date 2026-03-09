@@ -57,7 +57,7 @@ DC_XI = 0.0065      # temporal decay factor (per day) — global fallback
 DC_XI_BY_LEAGUE = {
     "PL":  0.0075,  # Premier League: more rotation -> downweight old data faster
     "PD":  0.0055,  # La Liga: more consistent -> historical data stays relevant longer
-    "BL1": 0.0070,  # Bundesliga: high variance mid-table -> weight recent form more
+    "BL1": 0.0060,  # Bundesliga: volatile league -> use more history for smoother model
     "FL1": 0.0065,  # Ligue 1: same as global
 }
 DC_RHO = 0.1        # low-score correction factor
@@ -70,7 +70,7 @@ ELO_HOME_BONUS = 100        # added to home team rating before probability calc 
 ELO_HOME_BONUS_BY_LEAGUE = {
     "PL":  90,   # Premier League: moderate home advantage
     "PD": 110,   # La Liga: high home advantage
-    "BL1": 80,   # Bundesliga: lower home advantage
+    "BL1": 92,   # Bundesliga: raised to match real home advantage data
     "FL1": 95,   # Ligue 1: moderate
 }
 ELO_GOAL_DIFF_EXP = 0.8     # exponent for goal-difference multiplier: (1+diff)^exp
@@ -101,7 +101,7 @@ JS_OUTPUT_PATH = "visualizador/data/predictions.js"
 DRAW_RATE_BY_LEAGUE = {
     "PL":  0.235,  # Premier League historical draw rate
     "PD":  0.265,  # La Liga
-    "BL1": 0.230,  # Bundesliga
+    "BL1": 0.248,  # Bundesliga: raised to reflect real draw rate (~24-25%)
     "FL1": 0.270,  # Ligue 1
 }
 
