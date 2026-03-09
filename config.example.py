@@ -77,8 +77,17 @@ ELO_GOAL_DIFF_EXP = 0.8     # exponent for goal-difference multiplier: (1+diff)^
 ELO_SEASON_REGRESSION = 0.85  # fraction of deviation from 1500 kept each new season
 
 # --- Form parameters ---
-FORM_DECAY = 0.85       # exponential decay per match (most recent = 1.0)
-FORM_WINDOW = 20        # max matches to look back
+FORM_DECAY = 0.95       # exponential decay per match — near-equal weights for recent streak
+FORM_WINDOW = 6         # short window: captures current form, not seasonal average
+
+# --- BTTS calibration ---
+BTTS_PRIOR_BLEND = 0.25
+BTTS_RATE_BY_LEAGUE = {
+    "PL":  0.548,
+    "PD":  0.529,
+    "BL1": 0.565,
+    "FL1": 0.510,
+}
 
 # --- Confidence thresholds for picks ---
 HIGH_CONFIDENCE_THRESHOLD = 0.62   # >= 62% for a single outcome
