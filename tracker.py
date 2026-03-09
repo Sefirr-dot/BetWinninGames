@@ -103,6 +103,58 @@ def update_results(db_path: str = PICKS_DB, quiet: bool = False) -> int:
 # Metrics computation
 # ---------------------------------------------------------------------------
 
+def _group_metrics(picks: list[dict]) -> dict:
+    """
+    Compute summary metrics for a subset of resolved picks (for per-league/stars breakdowns).
+    """
+    n = len(picks)
+    if n == 0:
+        return {"n": 0, "accuracy": None, "roi": None, "brier": None,
+                "accuracy_over25": None, "accuracy_btts": None}
+
+    correct = sum(1 for p in picks if p["best_outcome"] == p["actual_result"])
+
+    brier_sum = 0.0
+    for p in picks:
+        ph  = p.get("prob_home") or 0.0
+        pd_ = p.get("prob_draw") or 0.0
+        pa  = p.get("prob_away") or 0.0
+        tot = ph + pd_ + pa or 1.0
+        ph, pd_, pa = ph / tot, pd_ / tot, pa / tot
+        out = p["actual_result"]
+        brier_sum += (ph - (1 if out == "home" else 0)) ** 2
+        brier_sum += (pd_ - (1 if out == "draw" else 0)) ** 2
+        brier_sum += (pa  - (1 if out == "away" else 0)) ** 2
+
+    picks_with_odds = [p for p in picks if (p.get("fair_odds") or 0) > 1.0]
+    roi_num = sum(
+        (p["fair_odds"] - 1.0) if p["best_outcome"] == p["actual_result"] else -1.0
+        for p in picks_with_odds
+    )
+    roi = roi_num / len(picks_with_odds) if picks_with_odds else None
+
+    o25 = [p for p in picks if p.get("actual_over25") is not None]
+    acc_o25 = (
+        sum(1 for p in o25 if bool(p["actual_over25"]) == ((p.get("over25") or 0) >= 0.50)) / len(o25)
+        if o25 else None
+    )
+
+    btts = [p for p in picks if p.get("actual_btts") is not None]
+    acc_btts = (
+        sum(1 for p in btts if bool(p["actual_btts"]) == ((p.get("btts") or 0) >= 0.50)) / len(btts)
+        if btts else None
+    )
+
+    return {
+        "n":               n,
+        "accuracy":        round(correct / n, 4),
+        "roi":             round(roi, 4) if roi is not None else None,
+        "brier":           round(brier_sum / n, 4),
+        "accuracy_over25": round(acc_o25, 4) if acc_o25 is not None else None,
+        "accuracy_btts":   round(acc_btts, 4) if acc_btts is not None else None,
+    }
+
+
 def compute_metrics(resolved_picks: list[dict]) -> dict:
     """
     Compute P&L and calibration metrics from resolved picks.
@@ -117,6 +169,11 @@ def compute_metrics(resolved_picks: list[dict]) -> dict:
         bankroll_history  list of {date, bankroll} starting at 1.0
         calibration_ready bool
         n_for_calibration int
+        per_league       {PL: {n, accuracy, roi, brier, accuracy_over25, accuracy_btts}, ...}
+        per_stars        {"3": {...}, "4": {...}, "5": {...}}
+        per_market       {1x2: {accuracy, roi}, over25: {accuracy}, btts: {accuracy}}
+        hindsight_edge_by_league  {PL: float, ...}   (avg edge when market odds available)
+        hindsight_edge_by_stars   {"3": float, ...}
     """
     n = len(resolved_picks)
     if n == 0:
@@ -221,6 +278,58 @@ def compute_metrics(resolved_picks: list[dict]) -> dict:
             else:
                 vb_roi_sum -= 1.0
 
+    # ── Per-league breakdown ────────────────────────────────────────────────
+    leagues = sorted(set(p["league"] for p in picks_sorted if p.get("league")))
+    per_league = {
+        lg: _group_metrics([p for p in picks_sorted if p.get("league") == lg])
+        for lg in leagues
+    }
+
+    # ── Per-stars breakdown ─────────────────────────────────────────────────
+    all_stars = sorted(set(p["stars"] for p in picks_sorted if p.get("stars")))
+    per_stars = {
+        str(s): _group_metrics([p for p in picks_sorted if p.get("stars") == s])
+        for s in all_stars
+    }
+
+    # ── Per-market breakdown ────────────────────────────────────────────────
+    per_market = {
+        "1x2": {
+            "accuracy": round(correct_1x2 / n, 4),
+            "roi":      round(profit_flat / n, 4),
+        },
+        "over25": {
+            "accuracy": round(correct_o25 / total_o25, 4) if total_o25 else None,
+        },
+        "btts": {
+            "accuracy": round(correct_btts_count / total_btts, 4) if total_btts else None,
+        },
+    }
+
+    # ── Hindsight edge (Fase 1.4) ───────────────────────────────────────────
+    # For picks where market_odds is known: hindsight_edge = outcome(1/0) - 1/market_odds
+    he_by_league: dict[str, list[float]] = {}
+    he_by_stars:  dict[str, list[float]] = {}
+    for p in picks_sorted:
+        mkt = p.get("market_odds") or 0.0
+        if mkt <= 1.0:
+            continue
+        won  = p["best_outcome"] == p["actual_result"]
+        edge = (1.0 if won else 0.0) - (1.0 / mkt)
+        lg = p.get("league")
+        if lg:
+            he_by_league.setdefault(lg, []).append(edge)
+        s = str(p.get("stars"))
+        if s:
+            he_by_stars.setdefault(s, []).append(edge)
+
+    hindsight_edge_by_league = {
+        lg: round(sum(v) / len(v), 4) for lg, v in he_by_league.items() if v
+    }
+    hindsight_edge_by_stars = {
+        s: round(sum(v) / len(v), 4) for s, v in he_by_stars.items() if v
+    }
+
     return {
         "n_resolved": n,
         "n_pending": 0,      # filled by caller
@@ -237,6 +346,11 @@ def compute_metrics(resolved_picks: list[dict]) -> dict:
         "vb_n": vb_n,
         "vb_accuracy": round(vb_correct / vb_n, 4) if vb_n else None,
         "vb_roi_flat": round(vb_roi_sum / vb_n, 4) if vb_n else None,
+        "per_league":  per_league,
+        "per_stars":   per_stars,
+        "per_market":  per_market,
+        "hindsight_edge_by_league": hindsight_edge_by_league,
+        "hindsight_edge_by_stars":  hindsight_edge_by_stars,
     }
 
 

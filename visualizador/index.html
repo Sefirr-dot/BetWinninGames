@@ -2329,6 +2329,89 @@ function renderTrackingView() {
     </div>` : ''}
     `;
 
+  // ── Per-league breakdown table ──────────────────────────────────────────
+  let leagueBreakdownHtml = '';
+  if (m.per_league && Object.keys(m.per_league).length > 0) {
+    const lgRows = Object.entries(m.per_league).map(([lg, d]) => {
+      const acc    = d.accuracy   !== null ? (d.accuracy * 100).toFixed(1) + '%' : '—';
+      const roi    = d.roi        !== null ? (d.roi * 100 > 0 ? '+' : '') + (d.roi * 100).toFixed(1) + '%' : '—';
+      const brier  = d.brier      !== null ? d.brier.toFixed(3) : '—';
+      const o25    = d.accuracy_over25 !== null ? (d.accuracy_over25 * 100).toFixed(1) + '%' : '—';
+      const btts   = d.accuracy_btts   !== null ? (d.accuracy_btts   * 100).toFixed(1) + '%' : '—';
+      const he     = m.hindsight_edge_by_league && m.hindsight_edge_by_league[lg] !== undefined
+                       ? (m.hindsight_edge_by_league[lg] * 100 > 0 ? '+' : '') + (m.hindsight_edge_by_league[lg] * 100).toFixed(1) + '%'
+                       : '—';
+      const accNum = d.accuracy !== null ? d.accuracy * 100 : null;
+      const roiNum = d.roi      !== null ? d.roi * 100 : null;
+      return `<tr>
+        <td><span class="league-badge badge-${lg}">${lg}</span></td>
+        <td style="color:var(--muted)">${d.n}</td>
+        <td style="color:${accNum >= 60 ? 'var(--accent-green)' : accNum >= 50 ? 'var(--accent-yellow)' : 'var(--pd)'};font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700">${acc}</td>
+        <td style="color:${roiNum > 0 ? 'var(--accent-green)' : roiNum < 0 ? 'var(--pd)' : 'var(--muted)'};font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700">${roi}</td>
+        <td style="color:var(--muted)">${brier}</td>
+        <td style="color:var(--muted)">${o25}</td>
+        <td style="color:var(--muted)">${btts}</td>
+        <td style="color:${m.hindsight_edge_by_league && m.hindsight_edge_by_league[lg] > 0 ? 'var(--accent-green)' : m.hindsight_edge_by_league && m.hindsight_edge_by_league[lg] < 0 ? 'var(--pd)' : 'var(--muted)'}">${he}</td>
+      </tr>`;
+    }).join('');
+    leagueBreakdownHtml = `
+      <div class="bankroll-chart" style="margin-top:16px">
+        <div class="bankroll-chart-title">Desglose por Liga</div>
+        <div style="overflow-x:auto;margin-top:10px">
+          <table class="model-table">
+            <thead><tr>
+              <th>Liga</th><th>Picks</th><th>Accuracy</th><th>ROI</th>
+              <th>Brier</th><th>O2.5%</th><th>BTTS%</th><th>Edge real</th>
+            </tr></thead>
+            <tbody>${lgRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  // ── Per-stars breakdown table ────────────────────────────────────────────
+  let starsBreakdownHtml = '';
+  if (m.per_stars && Object.keys(m.per_stars).length > 0) {
+    const starRows = Object.entries(m.per_stars)
+      .sort((a, b) => Number(b[0]) - Number(a[0]))
+      .map(([s, d]) => {
+        const stars  = '★'.repeat(Number(s)) + '☆'.repeat(5 - Number(s));
+        const acc    = d.accuracy !== null ? (d.accuracy * 100).toFixed(1) + '%' : '—';
+        const roi    = d.roi      !== null ? (d.roi * 100 > 0 ? '+' : '') + (d.roi * 100).toFixed(1) + '%' : '—';
+        const he     = m.hindsight_edge_by_stars && m.hindsight_edge_by_stars[s] !== undefined
+                         ? (m.hindsight_edge_by_stars[s] * 100 > 0 ? '+' : '') + (m.hindsight_edge_by_stars[s] * 100).toFixed(1) + '%'
+                         : '—';
+        const accNum = d.accuracy !== null ? d.accuracy * 100 : null;
+        const roiNum = d.roi      !== null ? d.roi * 100 : null;
+        const barW   = accNum !== null ? accNum.toFixed(0) : 0;
+        const barCol = accNum >= 60 ? 'var(--accent-green)' : accNum >= 50 ? 'var(--accent-yellow)' : 'var(--pd)';
+        return `<tr>
+          <td style="font-family:'Barlow Condensed',sans-serif;font-size:15px;color:var(--accent-yellow)">${stars}</td>
+          <td style="color:var(--muted)">${d.n}</td>
+          <td style="color:${accNum >= 60 ? 'var(--accent-green)' : accNum >= 50 ? 'var(--accent-yellow)' : 'var(--pd)'};font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700">${acc}</td>
+          <td style="color:${roiNum > 0 ? 'var(--accent-green)' : roiNum < 0 ? 'var(--pd)' : 'var(--muted)'};font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700">${roi}</td>
+          <td style="color:${m.hindsight_edge_by_stars && m.hindsight_edge_by_stars[s] > 0 ? 'var(--accent-green)' : m.hindsight_edge_by_stars && m.hindsight_edge_by_stars[s] < 0 ? 'var(--pd)' : 'var(--muted)'}">${he}</td>
+          <td style="width:120px">
+            <div style="background:var(--surface2);border-radius:4px;height:8px;overflow:hidden">
+              <div style="background:${barCol};height:100%;width:${barW}%;border-radius:4px;transition:width 0.4s"></div>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+    starsBreakdownHtml = `
+      <div class="bankroll-chart" style="margin-top:16px">
+        <div class="bankroll-chart-title">Desglose por Estrellas</div>
+        <div style="overflow-x:auto;margin-top:10px">
+          <table class="model-table">
+            <thead><tr>
+              <th>Tier</th><th>Picks</th><th>Accuracy</th><th>ROI</th><th>Edge real</th><th>Barra</th>
+            </tr></thead>
+            <tbody>${starRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
   // Bankroll chart
   const chartHtml = `
     <div class="bankroll-chart">
@@ -2441,7 +2524,7 @@ function renderTrackingView() {
       </div>`;
   }
 
-  container.innerHTML = `<div class="track-view">${metricsHtml}${chartHtml}${reliabilityHtml}${subModelHtml}${tableHtml}</div>`;
+  container.innerHTML = `<div class="track-view">${metricsHtml}${leagueBreakdownHtml}${starsBreakdownHtml}${chartHtml}${reliabilityHtml}${subModelHtml}${tableHtml}</div>`;
 }
 
 // ── VALUE BETS VIEW ──
