@@ -264,7 +264,7 @@ def compute_metrics(results: list[dict]) -> dict:
         1 for r in results if (r["prediction"]["btts_prob"] >= 0.5) == r["actual_btts"]
     )
 
-    # Calibration by best_prob bucket
+    # Calibration by best_prob bucket (1X2)
     buckets = [(0.3, 0.4), (0.4, 0.5), (0.5, 0.6), (0.6, 0.7), (0.7, 1.01)]
     calibration = {}
     for lo, hi in buckets:
@@ -281,18 +281,76 @@ def compute_metrics(results: list[dict]) -> dict:
                 "actual_rate": win_rate,
             }
 
+    # Calibration by Over 2.5 probability bucket
+    calibration_over25 = {}
+    for lo, hi in buckets:
+        label = f"{lo:.1f}-{hi:.1f}" if hi < 1.0 else f"{lo:.1f}+"
+        bucket = [r for r in results if lo <= r["prediction"]["over25"] < hi]
+        if bucket:
+            actual_rate = sum(1 for r in bucket if r["actual_over25"]) / len(bucket)
+            avg_prob    = sum(r["prediction"]["over25"] for r in bucket) / len(bucket)
+            calibration_over25[label] = {
+                "n":           len(bucket),
+                "avg_prob":    avg_prob,
+                "actual_rate": actual_rate,
+            }
+
+    # Calibration by BTTS probability bucket
+    calibration_btts = {}
+    for lo, hi in buckets:
+        label = f"{lo:.1f}-{hi:.1f}" if hi < 1.0 else f"{lo:.1f}+"
+        bucket = [r for r in results if lo <= r["prediction"]["btts_prob"] < hi]
+        if bucket:
+            actual_rate = sum(1 for r in bucket if r["actual_btts"]) / len(bucket)
+            avg_prob    = sum(r["prediction"]["btts_prob"] for r in bucket) / len(bucket)
+            calibration_btts[label] = {
+                "n":           len(bucket),
+                "avg_prob":    avg_prob,
+                "actual_rate": actual_rate,
+            }
+
+    # Per-league Over 2.5 and BTTS accuracy
+    from collections import defaultdict
+    _lg_o25:  dict[str, list] = defaultdict(list)
+    _lg_btts: dict[str, list] = defaultdict(list)
+    for r in results:
+        lg = r["match"].get("_league_code", "")
+        if not lg:
+            continue
+        _lg_o25[lg].append((r["prediction"]["over25"] >= 0.5, r["actual_over25"]))
+        _lg_btts[lg].append((r["prediction"]["btts_prob"] >= 0.5, r["actual_btts"]))
+
+    per_league_over25 = {
+        lg: {
+            "n":        len(items),
+            "accuracy": round(sum(1 for p, a in items if p == a) / len(items), 4),
+        }
+        for lg, items in _lg_o25.items() if items
+    }
+    per_league_btts = {
+        lg: {
+            "n":        len(items),
+            "accuracy": round(sum(1 for p, a in items if p == a) / len(items), 4),
+        }
+        for lg, items in _lg_btts.items() if items
+    }
+
     return {
-        "n_matches":       n,
-        "accuracy_1x2":    correct_1x2 / n,
-        "brier_score":     brier,
-        "log_loss":        log_loss_val,
-        "roi_flat":        roi_flat,
-        "accuracy_over25": correct_over25 / n,
-        "accuracy_btts":   correct_btts / n,
-        "calibration":     calibration,
-        "vb_n":            vb_n,
-        "vb_accuracy":     vb_acc,
-        "vb_roi":          vb_roi,
+        "n_matches":          n,
+        "accuracy_1x2":       correct_1x2 / n,
+        "brier_score":        brier,
+        "log_loss":           log_loss_val,
+        "roi_flat":           roi_flat,
+        "accuracy_over25":    correct_over25 / n,
+        "accuracy_btts":      correct_btts / n,
+        "calibration":        calibration,
+        "calibration_over25": calibration_over25,
+        "calibration_btts":   calibration_btts,
+        "per_league_over25":  per_league_over25,
+        "per_league_btts":    per_league_btts,
+        "vb_n":               vb_n,
+        "vb_accuracy":        vb_acc,
+        "vb_roi":             vb_roi,
     }
 
 
@@ -411,12 +469,14 @@ def generate_report(
             )
         w()
 
-    if metrics["calibration"]:
-        w("CALIBRACIÓN  (prob predicha vs tasa real de acierto)")
+    def _write_calibration_table(title: str, cal: dict) -> None:
+        if not cal:
+            return
+        w(title)
         w(thin)
         w(f"  {'Bucket':<12} {'N':>6} {'Prob media':>12} {'Tasa real':>12} {'Diferencia':>12}")
         w("  " + "─" * 56)
-        for bucket, data in sorted(metrics["calibration"].items()):
+        for bucket, data in sorted(cal.items()):
             diff = data["actual_rate"] - data["avg_prob"]
             w(
                 f"  {bucket:<12} {data['n']:>6} "
@@ -424,6 +484,27 @@ def generate_report(
                 f"{data['actual_rate'] * 100:>11.1f}% "
                 f"{diff * 100:>+11.1f}%"
             )
+        w()
+
+    _write_calibration_table("CALIBRACIÓN 1X2  (prob predicha vs tasa real de acierto)", metrics["calibration"])
+    _write_calibration_table("CALIBRACIÓN OVER 2.5", metrics.get("calibration_over25", {}))
+    _write_calibration_table("CALIBRACIÓN BTTS", metrics.get("calibration_btts", {}))
+
+    if metrics.get("per_league_over25") or metrics.get("per_league_btts"):
+        w("ACCURACY POR LIGA — MERCADOS SECUNDARIOS")
+        w(thin)
+        w(f"  {'Liga':<6} {'Over2.5 Acc':>12} {'Over2.5 N':>10} {'BTTS Acc':>10} {'BTTS N':>8}")
+        w("  " + "─" * 52)
+        all_leagues = sorted(set(
+            list(metrics.get("per_league_over25", {}).keys()) +
+            list(metrics.get("per_league_btts", {}).keys())
+        ))
+        for lg in all_leagues:
+            o25_d  = metrics.get("per_league_over25", {}).get(lg, {})
+            btts_d = metrics.get("per_league_btts",   {}).get(lg, {})
+            o25_acc  = f"{o25_d['accuracy']*100:.1f}%"  if o25_d  else "—"
+            btts_acc = f"{btts_d['accuracy']*100:.1f}%" if btts_d else "—"
+            w(f"  {lg:<6} {o25_acc:>12} {o25_d.get('n','—'):>10} {btts_acc:>10} {btts_d.get('n','—'):>8}")
         w()
 
     w("MUESTRA — PRIMEROS 15 RESULTADOS")
