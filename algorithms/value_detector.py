@@ -273,6 +273,14 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
         base_threshold = VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE.get(league, VALUE_BET_EDGE_THRESHOLD)
         effective_threshold = base_threshold + (5 - stars) * VALUE_BET_EDGE_STEP
 
+        # Odds movement signal (sharp money)
+        match_date = mi.get("utcDate", "")[:10]
+        try:
+            from odds_fetcher import get_odds_movement
+            movement = get_odds_movement(home_name, away_name, match_date)
+        except Exception:
+            movement = None
+
         checks = [
             ("home",  pred.get("prob_home", 0.0), odds["odds_1"]),
             ("draw",  pred.get("prob_draw", 0.0), odds["odds_x"]),
@@ -291,19 +299,29 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
             implied_prob = 1.0 / bk_odds
             edge = model_prob - implied_prob
 
-            if edge >= effective_threshold:
-                kelly = _kelly_fraction(edge, bk_odds, stars, league)
+            # Sharp money bonus: odds shortened >10% on same outcome as model
+            _outcome_mv_key = {"home": "home", "draw": "draw", "away": "away",
+                                "over25": None, "btts": None}.get(outcome)
+            mv_ratio = (movement.get(_outcome_mv_key, 1.0)
+                        if movement and _outcome_mv_key else 1.0)
+            sharp_money = mv_ratio >= 1.10
+            effective_edge = edge + (0.02 if sharp_money else 0.0)
+
+            if effective_edge >= effective_threshold:
+                kelly = _kelly_fraction(effective_edge, bk_odds, stars, league)
                 value_bets.append({
                     "match":          f"{home_name} vs {away_name}",
                     "league":         mi.get("_league_code", ""),
                     "outcome":        outcome,
                     "model_prob":     model_prob,
                     "implied_prob":   implied_prob,
-                    "edge":           edge,
+                    "edge":           effective_edge,
                     "bk_odds":        bk_odds,
                     "kelly_fraction": kelly,
                     "home_name":      home_name,
                     "away_name":      away_name,
+                    "odds_movement":  mv_ratio if movement and _outcome_mv_key else None,
+                    "sharp_money":    sharp_money,
                 })
 
     return sorted(value_bets, key=lambda x: x["edge"], reverse=True)

@@ -12,11 +12,79 @@ Fri–Mon weekend window costs only 5 requests total.
 
 import csv
 import os
+import sqlite3
 import time
 
 import requests
 
 from config import ODDS_API_KEY, ODDS_DIR, CACHE_TTL_HOURS
+
+_HISTORY_DB = "cache/odds_history.db"
+
+
+def _history_conn() -> sqlite3.Connection:
+    os.makedirs("cache", exist_ok=True)
+    conn = sqlite3.connect(_HISTORY_DB)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS odds_history (
+            match_key  TEXT,
+            fetched_at REAL,
+            odds_1     REAL,
+            odds_x     REAL,
+            odds_2     REAL,
+            PRIMARY KEY (match_key, fetched_at)
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+def save_odds_history(rows_by_date: dict[str, list[dict]]) -> None:
+    """Persist fetched odds to odds_history.db for movement tracking."""
+    now = time.time()
+    with _history_conn() as conn:
+        for date_str, rows in rows_by_date.items():
+            for row in rows:
+                key = f"{row['home_team']}|{row['away_team']}|{date_str}"
+                conn.execute(
+                    "INSERT OR REPLACE INTO odds_history VALUES (?,?,?,?,?)",
+                    (key, now, row["odds_1"], row["odds_x"], row["odds_2"]),
+                )
+        conn.commit()
+
+
+def get_odds_movement(home: str, away: str, match_date: str) -> dict | None:
+    """
+    Return odds movement ratios for a match (earliest / latest odds).
+
+    A ratio > 1.10 on an outcome means the odds shortened significantly
+    (sharp money on that outcome).  Returns None when fewer than 2
+    historical snapshots exist for this match.
+
+    Returns
+    -------
+    dict with keys "home", "draw", "away" (float ratios) or None
+    """
+    if not os.path.exists(_HISTORY_DB):
+        return None
+    key = f"{home}|{away}|{match_date}"
+    with _history_conn() as conn:
+        rows = conn.execute(
+            "SELECT odds_1, odds_x, odds_2 FROM odds_history "
+            "WHERE match_key=? ORDER BY fetched_at ASC",
+            (key,),
+        ).fetchall()
+    if len(rows) < 2:
+        return None
+    first, last = rows[0], rows[-1]
+    # ratio = opening / closing; > 1 means odds shortened (money poured in)
+    def _safe_ratio(o, c):
+        return round(o / c, 3) if c and c > 1.0 else 1.0
+    return {
+        "home": _safe_ratio(first[0], last[0]),
+        "draw": _safe_ratio(first[1], last[1]),
+        "away": _safe_ratio(first[2], last[2]),
+    }
 
 
 def _all_csvs_fresh(dates: list[str]) -> bool:
@@ -179,5 +247,7 @@ def fetch_window(dates: list[str], league_code: str | None = None) -> list[str]:
 
     if not written:
         print("    [odds_fetcher] Sin cuotas para las fechas solicitadas.")
+    else:
+        save_odds_history(by_date)
 
     return written

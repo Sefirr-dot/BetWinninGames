@@ -12,6 +12,7 @@ from config import (MODEL_WEIGHTS, HIGH_CONFIDENCE_THRESHOLD, MEDIUM_CONFIDENCE_
                     DRAW_RATE_BY_LEAGUE, MARKET_BLEND_WEIGHT,
                     HIGH_PROB_CORRECTION_ALPHA, HIGH_PROB_CORRECTION_THRESHOLD)
 from algorithms import dixon_coles, elo, form, btts, corners, cards, h2h, fatigue
+import match_context as _match_context
 from algorithms import calibrator as _calibrator
 from algorithms import weight_optimizer as _wopt
 from algorithms import meta_learner as _meta_learner
@@ -434,6 +435,13 @@ def predict_match(
         "_context": _sub_preds["context"],
         "_used_meta_learner": ml_result is not None,
         "_market_blend_applied": market_blend_applied,
+        "_tags": _match_context.classify(
+            elo_pred   = elo_pred,
+            form_pred  = form_pred,
+            h2h_pred   = h2h_pred,
+            home_pos   = home_pos,
+            away_pos   = away_pos,
+        ),
     }
 
 

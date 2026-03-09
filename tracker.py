@@ -330,6 +330,19 @@ def compute_metrics(resolved_picks: list[dict]) -> dict:
         s: round(sum(v) / len(v), 4) for s, v in he_by_stars.items() if v
     }
 
+    # ── Per-tag breakdown ───────────────────────────────────────────────────
+    import json as _json
+    tag_buckets: dict[str, list] = {}
+    for p in picks_sorted:
+        raw_tags = p.get("match_tags")
+        try:
+            tags = _json.loads(raw_tags) if raw_tags else []
+        except Exception:
+            tags = []
+        for tag in tags:
+            tag_buckets.setdefault(tag, []).append(p)
+    per_tag = {tag: _group_metrics(picks) for tag, picks in tag_buckets.items() if picks}
+
     return {
         "n_resolved": n,
         "n_pending": 0,      # filled by caller
@@ -349,6 +362,7 @@ def compute_metrics(resolved_picks: list[dict]) -> dict:
         "per_league":  per_league,
         "per_stars":   per_stars,
         "per_market":  per_market,
+        "per_tag":     per_tag,
         "hindsight_edge_by_league": hindsight_edge_by_league,
         "hindsight_edge_by_stars":  hindsight_edge_by_stars,
     }

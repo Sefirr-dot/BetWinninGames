@@ -65,6 +65,8 @@ def init_db(db_path: str) -> None:
             conn.execute("ALTER TABLE picks ADD COLUMN sub_preds TEXT")
         if "source" not in existing:
             conn.execute("ALTER TABLE picks ADD COLUMN source TEXT DEFAULT 'live'")
+        if "match_tags" not in existing:
+            conn.execute("ALTER TABLE picks ADD COLUMN match_tags TEXT")
         conn.commit()
 
 
@@ -147,13 +149,15 @@ def save_picks(
             if ctx:
                 sub["context"] = {k: round(v, 6) for k, v in ctx.items()}
             sub_preds_json = json.dumps(sub) if sub else None
+            tags           = pred.get("_tags") or []
+            tags_json      = json.dumps(tags) if tags else None
 
             cur = conn.execute(
                 """INSERT OR IGNORE INTO picks
                    (match_id, run_date, match_date, home_team, away_team, league,
                     prob_home, prob_draw, prob_away, stars, best_outcome, best_prob,
-                    over25, btts, fair_odds, market_odds, sub_preds, source)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    over25, btts, fair_odds, market_odds, sub_preds, source, match_tags)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     match_id,
                     run_ts,
@@ -173,6 +177,7 @@ def save_picks(
                     market_odds,
                     sub_preds_json,
                     source,
+                    tags_json,
                 ),
             )
             inserted += cur.rowcount
