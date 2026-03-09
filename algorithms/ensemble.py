@@ -12,6 +12,9 @@ from config import (MODEL_WEIGHTS, HIGH_CONFIDENCE_THRESHOLD, MEDIUM_CONFIDENCE_
                     DRAW_RATE_BY_LEAGUE, MARKET_BLEND_WEIGHT,
                     HIGH_PROB_CORRECTION_ALPHA, HIGH_PROB_CORRECTION_THRESHOLD)
 from algorithms import dixon_coles, elo, form, btts, corners, cards, h2h, fatigue
+from algorithms import simulate as _simulate
+from algorithms import motivation as _motivation
+from algorithms import referee as _referee
 import match_context as _match_context
 from algorithms import calibrator as _calibrator
 from algorithms import weight_optimizer as _wopt
@@ -194,6 +197,7 @@ def predict_match(
     elo_home_ratings: dict | None = None,
     elo_away_ratings: dict | None = None,
     odds_age_hours: float | None = None,
+    referee_name: str | None = None,
 ) -> dict:
     """
     Full prediction for one match.
@@ -289,6 +293,11 @@ def predict_match(
     lam = dc_pred.get("lambda_", 1.3) if dc_pred else 1.3
     mu  = dc_pred.get("mu_",      1.0) if dc_pred else 1.0
 
+    # --- Motivation adjustment ---
+    motiv = _motivation.from_standings(home_pos, away_pos, league_code or "")
+    lam = round(lam * motiv["home_mult"], 4)
+    mu  = round(mu  * motiv["away_mult"], 4)
+
     # --- Draw adjustment: nudge draw prob toward league historical rate ---
     # Enhanced draw detector: composite score amplifies nudge when multiple signals align.
     elo_diff = abs(elo_pred.get("rating_home", 1500) - elo_pred.get("rating_away", 1500))
@@ -363,6 +372,16 @@ def predict_match(
         except (KeyError, ZeroDivisionError):
             pass
 
+    # --- Referee adjustment (small home/away bias correction) ---
+    _ref_profiles = _referee.load_profiles()
+    ref_adj = _referee.get_adjustments(referee_name, league_code or "", _ref_profiles)
+    if ref_adj["known"] and abs(ref_adj["home_prob_adj"]) > 0.001:
+        adj = ref_adj["home_prob_adj"]
+        ph = max(0.05, ph + adj)
+        pa = max(0.05, pa - adj * 0.7)   # partly absorbed from draw too
+        s  = ph + pd + pa
+        ph, pd, pa = ph / s, pd / s, pa / s
+
     # --- BTTS (Poisson exact using fatigue-adjusted lambda/mu) ---
     btts_pred = btts.predict(home_id, away_id, all_matches, lambda_=lam, mu_=mu,
                              league_code=league_code)
@@ -373,8 +392,13 @@ def predict_match(
         btts_prob = 0.85 * btts_prob + 0.15 * h2h_pred["btts_rate"]
         btts_prob = max(0.10, min(0.90, btts_prob))
 
-    # --- Over 2.5 ---
-    dc_over25 = dc_pred.get("over25", 0.50) if dc_pred else 0.50
+    # --- Monte Carlo simulation (all secondary markets) ---
+    dc_rho = dc_pred.get("rho", 0.05) if dc_pred else 0.05
+    mc = _simulate.simulate(lam, mu, rho=dc_rho)
+
+    # Use MC for secondary markets — more accurate than Poisson-exact and
+    # adds Over 1.5 / Over 3.5 / Over 4.5 / Asian HCap / BTTS combos
+    dc_over25 = mc["over25"]
 
     # --- Corners ---
     corners_pred = corners.predict(lam, mu)
@@ -442,15 +466,20 @@ def predict_match(
         "fatigue": fat,
         "home_pos": home_pos,
         "away_pos": away_pos,
+        "mc": mc,
+        "motivation": motiv,
+        "referee_adj": ref_adj,
         "_context": _sub_preds["context"],
         "_used_meta_learner": ml_result is not None,
         "_market_blend_applied": market_blend_applied,
-        "_tags": _match_context.classify(
-            elo_pred   = elo_pred,
-            form_pred  = form_pred,
-            h2h_pred   = h2h_pred,
-            home_pos   = home_pos,
-            away_pos   = away_pos,
+        "_tags": (
+            _match_context.classify(
+                elo_pred   = elo_pred,
+                form_pred  = form_pred,
+                h2h_pred   = h2h_pred,
+                home_pos   = home_pos,
+                away_pos   = away_pos,
+            ) + motiv["tags"]
         ),
     }
 

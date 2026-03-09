@@ -330,6 +330,16 @@ def compute_metrics(resolved_picks: list[dict]) -> dict:
         s: round(sum(v) / len(v), 4) for s, v in he_by_stars.items() if v
     }
 
+    # ── CLV (Closing Line Value) ────────────────────────────────────────────
+    clv_picks = [p for p in picks_sorted if p.get("clv") is not None]
+    avg_clv = round(sum(p["clv"] for p in clv_picks) / len(clv_picks), 4) if clv_picks else None
+    clv_by_league: dict[str, list] = {}
+    for p in clv_picks:
+        clv_by_league.setdefault(p.get("league", ""), []).append(p["clv"])
+    avg_clv_by_league = {
+        lg: round(sum(v) / len(v), 4) for lg, v in clv_by_league.items() if v
+    }
+
     # ── Per-tag breakdown ───────────────────────────────────────────────────
     import json as _json
     tag_buckets: dict[str, list] = {}
@@ -362,7 +372,10 @@ def compute_metrics(resolved_picks: list[dict]) -> dict:
         "per_league":  per_league,
         "per_stars":   per_stars,
         "per_market":  per_market,
-        "per_tag":     per_tag,
+        "per_tag":             per_tag,
+        "avg_clv":             avg_clv,
+        "avg_clv_by_league":   avg_clv_by_league,
+        "n_clv_picks":         len(clv_picks),
         "hindsight_edge_by_league": hindsight_edge_by_league,
         "hindsight_edge_by_stars":  hindsight_edge_by_stars,
     }

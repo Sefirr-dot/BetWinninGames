@@ -124,6 +124,26 @@ def predict_for_date(
             home_name = match.get("homeTeam", {}).get("name", "")
             away_name = match.get("awayTeam", {}).get("name", "")
             match_odds = value_detector.get_match_odds(home_name, away_name, odds_map)
+            referee_name = match.get("_referee")
+
+            # Lineup impact — only when match kicks off within 3 hours
+            lineup_impact = None
+            try:
+                from datetime import datetime, timezone
+                from algorithms.lineup_impact import fetch_lineup, estimate_impact
+                utc_str   = match.get("utcDate", "")
+                kickoff   = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                hours_to_ko = (kickoff - datetime.now(timezone.utc)).total_seconds() / 3600
+                if -1 < hours_to_ko < 3:   # window: 3h before to 1h after
+                    match_id_val = match.get("id")
+                    if match_id_val:
+                        lu = fetch_lineup(match_id_val)
+                        lineup_impact = estimate_impact(lu)
+                        if lineup_impact and lineup_impact.get("notes"):
+                            print(f"    [lineup] {home_name} vs {away_name}: {', '.join(lineup_impact['notes'])}")
+            except Exception:
+                pass
+
             pred = ensemble.predict_match(
                 home_id, away_id, dc_params, elo_ratings, historical,
                 reference_date=ref_date,
@@ -133,6 +153,7 @@ def predict_for_date(
                 elo_home_ratings=elo_home_ratings,
                 elo_away_ratings=elo_away_ratings,
                 odds_age_hours=odds_age_hours,
+                referee_name=referee_name,
             )
             predictions.append({"match_info": match, "prediction": pred})
         except Exception as e:

@@ -357,6 +357,22 @@ def _download_csv(league: str, season: int) -> list[dict]:
         except (ValueError, TypeError):
             pass
 
+        # Referee
+        ref = row.get("Referee", "").strip()
+        if ref:
+            entry["referee"] = ref
+
+        # Cards — HY (home yellow) / AY (away yellow)
+        try:
+            hy = int(row["HY"]) if row.get("HY") else None
+            ay = int(row["AY"]) if row.get("AY") else None
+            if hy is not None:
+                entry["home_yellow"] = hy
+            if ay is not None:
+                entry["away_yellow"] = ay
+        except (ValueError, TypeError):
+            pass
+
         # Bookmaker odds — B365 (most coverage) and Pinnacle/PS (sharpest)
         for src_h, src_d, src_a, dst_h, dst_d, dst_a in [
             ("B365H", "B365D", "B365A", "b365_h", "b365_d", "b365_a"),
@@ -418,6 +434,14 @@ def _to_match_dict(
         m["_hc"]             = row["home_corners"]
         m["_ac"]             = row["away_corners"]
         m["_total_corners"]  = row["home_corners"] + row["away_corners"]
+
+    # Inject referee and cards for referee model
+    if row.get("referee"):
+        m["_referee"]     = row["referee"]
+    if row.get("home_yellow") is not None:
+        m["_home_yellow"] = row["home_yellow"]
+    if row.get("away_yellow") is not None:
+        m["_away_yellow"] = row["away_yellow"]
 
     # Inject bookmaker odds for value bet backtesting
     # Prefer Pinnacle (sharpest), fall back to B365 (most coverage)

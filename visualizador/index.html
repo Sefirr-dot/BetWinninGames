@@ -2430,12 +2430,17 @@ function renderTrackingView() {
   let tagBreakdownHtml = '';
   if (m.per_tag && Object.keys(m.per_tag).length > 0) {
     const _tagLabel = {
-      even_match:      '⚖️ Partido igualado',
-      top6_clash:      '🔝 Top 6',
-      relegation_6ptr: '🔥 Lucha relegación',
-      home_in_form:    '📈 Local en forma',
-      away_in_form:    '📈 Visitante en forma',
-      h2h_dominant:    '👑 H2H dominante',
+      even_match:       '⚖️ Partido igualado',
+      top6_clash:       '🔝 Top 6',
+      relegation_6ptr:  '🔥 Lucha relegación',
+      home_in_form:     '📈 Local en forma',
+      away_in_form:     '📈 Visitante en forma',
+      h2h_dominant:     '👑 H2H dominante',
+      home_must_win:    '🔴 Local necesita ganar',
+      away_must_win:    '🔵 Visitante necesita ganar',
+      six_pointer:      '⚡ 6 puntos',
+      home_dead_rubber: '😴 Local sin motiv.',
+      away_dead_rubber: '😴 Visitante sin motiv.',
     };
     const tagRows = Object.entries(m.per_tag)
       .sort((a, b) => (b[1].n || 0) - (a[1].n || 0))
@@ -2837,10 +2842,14 @@ function renderMatchModal(m) {
     <div class="modal-section">
       <div class="modal-section-title">Stats del partido</div>
       <div class="modal-stat-row">
-        <div class="modal-stat-chip"><div class="sv ${m.over25yn?'':''}"><span class="stat-yn ${m.over25yn?'yn-yes':'yn-no'}" style="font-size:14px">${m.over25yn?'SI':'NO'}</span></div><div class="sl">Over 2.5 (${m.over25}%)</div></div>
+        <div class="modal-stat-chip"><div class="sv"><span class="stat-yn ${m.over25yn?'yn-yes':'yn-no'}" style="font-size:14px">${m.over25yn?'SI':'NO'}</span></div><div class="sl">Over 2.5 (${m.over25}%)</div></div>
         <div class="modal-stat-chip"><div class="sv"><span class="stat-yn ${m.bttsyn?'yn-yes':'yn-no'}" style="font-size:14px">${m.bttsyn?'SI':'NO'}</span></div><div class="sl">BTTS (${m.btts}%)</div></div>
+        ${m.over15 ? `<div class="modal-stat-chip"><div class="sv" style="color:var(--accent-green)">${m.over15}%</div><div class="sl">Over 1.5</div></div>` : ''}
+        ${m.over35 ? `<div class="modal-stat-chip"><div class="sv" style="color:${m.over35>=50?'var(--accent-teal)':'var(--muted)'}">${m.over35}%</div><div class="sl">Over 3.5</div></div>` : ''}
+        ${m.over45 ? `<div class="modal-stat-chip"><div class="sv" style="color:var(--muted)">${m.over45}%</div><div class="sl">Over 4.5</div></div>` : ''}
+        ${m.bttsAndOver25 ? `<div class="modal-stat-chip"><div class="sv" style="color:var(--accent-yellow)">${m.bttsAndOver25}%</div><div class="sl">BTTS + O2.5</div></div>` : ''}
         <div class="modal-stat-chip"><div class="sv">${m.corners !== null ? m.corners : '—'}</div><div class="sl">Córners esp.</div></div>
-        ${m.cards !== null ? `<div class="modal-stat-chip"><div class="sv" style="color:var(--accent-orange)">${m.cardsHome}+${m.cardsAway}</div><div class="sl">Tarjetas esp. (${m.cards} tot.)</div></div>` : ''}
+        ${m.cards !== null ? `<div class="modal-stat-chip"><div class="sv" style="color:var(--accent-orange)">${m.cardsHome}+${m.cardsAway}</div><div class="sl">Tarjetas esp.</div></div>` : ''}
         ${m.goalsHome !== null ? `<div class="modal-stat-chip"><div class="sv"><span style="color:var(--home)">${m.goalsHome}</span><span style="color:var(--muted);font-size:14px">-</span><span style="color:var(--away)">${m.goalsAway}</span></div><div class="sl">Goles esp.</div></div>` : ''}
       </div>
       <div class="modal-stat-row" style="margin-top:8px">
@@ -2849,6 +2858,15 @@ function renderMatchModal(m) {
         ${m.bestScore ? `<div class="modal-stat-chip"><div class="sv" style="color:var(--accent-gold)">${m.bestScore}</div><div class="sl">Score más probable (${m.bestScoreProb}%)</div></div>` : ''}
         ${m.eloConf !== null ? `<div class="modal-stat-chip"><div class="sv">${m.eloConf}%</div><div class="sl">Conf. Elo</div></div>` : ''}
       </div>
+      ${(m.ahHomeMinus1Win || m.ahAwayPlus1Win) ? `
+      <div style="margin-top:10px;padding:10px;background:var(--surface2);border-radius:8px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Asian Handicap (MC)</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          ${m.ahHomeMinus1Win ? `<div style="text-align:center"><div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--home)">${m.ahHomeMinus1Win}%</div><div style="font-size:10px;color:var(--muted)">${m.homeShort} -1 gana</div></div>` : ''}
+          ${m.ahHomeMinus1Push ? `<div style="text-align:center"><div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent-yellow)">${m.ahHomeMinus1Push}%</div><div style="font-size:10px;color:var(--muted)">${m.homeShort} -1 empuje</div></div>` : ''}
+          ${m.ahAwayPlus1Win ? `<div style="text-align:center"><div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--away)">${m.ahAwayPlus1Win}%</div><div style="font-size:10px;color:var(--muted)">${m.awayShort} +1 gana</div></div>` : ''}
+        </div>
+      </div>` : ''}
     </div>`;
 
   // Score distribution grid (from Dixon-Coles prob_matrix)
@@ -2893,12 +2911,17 @@ function renderMatchModal(m) {
   let tagsSection = '';
   if (m.contextTags && m.contextTags.length) {
     const _tagLabel = {
-      even_match:       '⚖️ Partido igualado',
-      top6_clash:       '🔝 Top 6',
-      relegation_6ptr:  '🔥 Lucha por no descender',
-      home_in_form:     '📈 Local en forma',
-      away_in_form:     '📈 Visitante en forma',
-      h2h_dominant:     '👑 H2H dominante',
+      even_match:        '⚖️ Partido igualado',
+      top6_clash:        '🔝 Top 6',
+      relegation_6ptr:   '🔥 Lucha por no descender',
+      home_in_form:      '📈 Local en forma',
+      away_in_form:      '📈 Visitante en forma',
+      h2h_dominant:      '👑 H2H dominante',
+      home_must_win:     '🔴 Local necesita ganar',
+      away_must_win:     '🔵 Visitante necesita ganar',
+      six_pointer:       '⚡ Partido decisivo (6 puntos)',
+      home_dead_rubber:  '😴 Local sin motivación',
+      away_dead_rubber:  '😴 Visitante sin motivación',
     };
     const chips = m.contextTags.map(t =>
       `<span style="display:inline-block;background:rgba(20,184,166,0.12);border:1px solid rgba(20,184,166,0.3);

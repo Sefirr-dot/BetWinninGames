@@ -467,6 +467,14 @@ def _prediction_to_dict(entry: dict, date_str: str, match_vbs: list[dict], stand
         "aiNote":        pred.get("_ai_note"),
         "aiFactors":     pred.get("_ai_factors") or None,
         "contextTags":   pred.get("_tags") or [],
+        # Monte Carlo secondary markets
+        "over15":        round((pred.get("mc") or {}).get("over15", 0) * 100, 1),
+        "over35":        round((pred.get("mc") or {}).get("over35", 0) * 100, 1),
+        "over45":        round((pred.get("mc") or {}).get("over45", 0) * 100, 1),
+        "bttsAndOver25": round((pred.get("mc") or {}).get("btts_and_over25", 0) * 100, 1),
+        "ahHomeMinus1Win":  round((pred.get("mc") or {}).get("ah_home_m1_win",  0) * 100, 1),
+        "ahHomeMinus1Push": round((pred.get("mc") or {}).get("ah_home_m1_push", 0) * 100, 1),
+        "ahAwayPlus1Win":   round((pred.get("mc") or {}).get("ah_away_p1_win",  0) * 100, 1),
     }
 
 

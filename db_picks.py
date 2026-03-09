@@ -67,6 +67,12 @@ def init_db(db_path: str) -> None:
             conn.execute("ALTER TABLE picks ADD COLUMN source TEXT DEFAULT 'live'")
         if "match_tags" not in existing:
             conn.execute("ALTER TABLE picks ADD COLUMN match_tags TEXT")
+        if "our_implied_prob" not in existing:
+            conn.execute("ALTER TABLE picks ADD COLUMN our_implied_prob REAL")
+        if "closing_odds" not in existing:
+            conn.execute("ALTER TABLE picks ADD COLUMN closing_odds REAL")
+        if "clv" not in existing:
+            conn.execute("ALTER TABLE picks ADD COLUMN clv REAL")
         conn.commit()
 
 
@@ -151,13 +157,16 @@ def save_picks(
             sub_preds_json = json.dumps(sub) if sub else None
             tags           = pred.get("_tags") or []
             tags_json      = json.dumps(tags) if tags else None
+            # Store our implied probability at prediction time for CLV tracking
+            our_implied    = round(1.0 / fair_odds, 4) if fair_odds else None
 
             cur = conn.execute(
                 """INSERT OR IGNORE INTO picks
                    (match_id, run_date, match_date, home_team, away_team, league,
                     prob_home, prob_draw, prob_away, stars, best_outcome, best_prob,
-                    over25, btts, fair_odds, market_odds, sub_preds, source, match_tags)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    over25, btts, fair_odds, market_odds, sub_preds, source,
+                    match_tags, our_implied_prob)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     match_id,
                     run_ts,
@@ -178,12 +187,32 @@ def save_picks(
                     sub_preds_json,
                     source,
                     tags_json,
+                    our_implied,
                 ),
             )
             inserted += cur.rowcount
         conn.commit()
 
     return inserted
+
+
+def update_clv(match_id: int, closing_odds: float, db_path: str) -> None:
+    """
+    Store the closing market odds and compute CLV for a resolved pick.
+    CLV = our_implied_prob - (1 / closing_odds)
+    Positive CLV means our prediction was better than the closing market.
+    """
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT our_implied_prob FROM picks WHERE match_id=?", (match_id,)
+        ).fetchone()
+        if row and row[0]:
+            clv = round(row[0] - (1.0 / closing_odds), 4)
+            conn.execute(
+                "UPDATE picks SET closing_odds=?, clv=? WHERE match_id=?",
+                (closing_odds, clv, match_id),
+            )
+            conn.commit()
 
 
 def get_unresolved(before_date: str, db_path: str) -> list[dict]:
