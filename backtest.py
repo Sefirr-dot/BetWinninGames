@@ -152,14 +152,16 @@ def run_backtest(
                     elo_away_ratings=elo_away_rt,
                     market_odds=market_odds,
                 )
+                tc = match.get("_total_corners")
                 results.append({
-                    "fold_id":       fold,
-                    "match":         match,
-                    "prediction":    pred,
-                    "actual":        actual,
-                    "actual_over25": _actual_over25(match),
-                    "actual_btts":   _actual_btts(match),
-                    "market_odds":   market_odds,
+                    "fold_id":        fold,
+                    "match":          match,
+                    "prediction":     pred,
+                    "actual":         actual,
+                    "actual_over25":  _actual_over25(match),
+                    "actual_btts":    _actual_btts(match),
+                    "actual_corners": tc,   # None when not available (non-fdco matches)
+                    "market_odds":    market_odds,
                 })
             except Exception as e:
                 home = match.get("homeTeam", {}).get("name", "?")
@@ -335,6 +337,30 @@ def compute_metrics(results: list[dict]) -> dict:
         for lg, items in _lg_btts.items() if items
     }
 
+    # Corners validation (only for matches where actual corners are available)
+    corners_results = [
+        r for r in results
+        if r.get("actual_corners") is not None
+        and r["prediction"].get("corners", {}).get("expected_corners") is not None
+    ]
+    corners_mae      = None
+    corners_accuracy = None
+    corners_n        = len(corners_results)
+    if corners_n:
+        mae_sum = sum(
+            abs(r["prediction"]["corners"]["expected_corners"] - r["actual_corners"])
+            for r in corners_results
+        )
+        corners_mae = mae_sum / corners_n
+
+        # Accuracy on the 9.5 over/under line (same line used by reporter/visualizer)
+        correct_corners = sum(
+            1 for r in corners_results
+            if (r["prediction"]["corners"].get("over_lines", {}).get(9.5, 0) >= 0.5)
+               == (r["actual_corners"] > 9.5)
+        )
+        corners_accuracy = correct_corners / corners_n
+
     return {
         "n_matches":          n,
         "accuracy_1x2":       correct_1x2 / n,
@@ -348,6 +374,9 @@ def compute_metrics(results: list[dict]) -> dict:
         "calibration_btts":   calibration_btts,
         "per_league_over25":  per_league_over25,
         "per_league_btts":    per_league_btts,
+        "corners_mae":        round(corners_mae, 3)      if corners_mae      is not None else None,
+        "corners_accuracy":   round(corners_accuracy, 4) if corners_accuracy is not None else None,
+        "corners_n":          corners_n,
         "vb_n":               vb_n,
         "vb_accuracy":        vb_acc,
         "vb_roi":             vb_roi,
@@ -448,6 +477,12 @@ def generate_report(
     w(f"  ROI Flat:          {metrics['roi_flat'] * 100:+.1f}%  (a cuotas justas del modelo)")
     w(f"  Accuracy Over 2.5: {metrics['accuracy_over25'] * 100:.1f}%")
     w(f"  Accuracy BTTS:     {metrics['accuracy_btts'] * 100:.1f}%")
+    if metrics.get("corners_n"):
+        mae = metrics["corners_mae"]
+        acc = metrics["corners_accuracy"]
+        verdict = "OK (<1.8)" if mae < 1.8 else "MARGINAL (1.8-2.5)" if mae < 2.5 else "REDISENAR (>2.5)"
+        w(f"  Corners MAE:       {mae:.3f} corners  [{verdict}]  (n={metrics['corners_n']})")
+        w(f"  Corners Acc O9.5:  {acc * 100:.1f}%")
     if metrics.get("vb_n"):
         vb_roi_str = f"{metrics['vb_roi'] * 100:+.1f}%" if metrics["vb_roi"] is not None else "N/A"
         vb_acc_str = f"{metrics['vb_accuracy'] * 100:.1f}%" if metrics["vb_accuracy"] is not None else "N/A"

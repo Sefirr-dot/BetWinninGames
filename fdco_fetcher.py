@@ -347,6 +347,16 @@ def _download_csv(league: str, season: int) -> list[dict]:
         except (ValueError, TypeError):
             pass
 
+        # Corners — HC (home corners) / AC (away corners)
+        try:
+            hc = int(row["HC"]) if row.get("HC") else None
+            ac = int(row["AC"]) if row.get("AC") else None
+            if hc is not None and ac is not None:
+                entry["home_corners"] = hc
+                entry["away_corners"] = ac
+        except (ValueError, TypeError):
+            pass
+
         # Bookmaker odds — B365 (most coverage) and Pinnacle/PS (sharpest)
         for src_h, src_d, src_a, dst_h, dst_d, dst_a in [
             ("B365H", "B365D", "B365A", "b365_h", "b365_d", "b365_a"),
@@ -402,6 +412,12 @@ def _to_match_dict(
     if row.get("xg_home") is not None:
         m["_xg_home"] = row["xg_home"]
         m["_xg_away"] = row["xg_away"]
+
+    # Inject corners for backtest validation
+    if row.get("home_corners") is not None and row.get("away_corners") is not None:
+        m["_hc"]             = row["home_corners"]
+        m["_ac"]             = row["away_corners"]
+        m["_total_corners"]  = row["home_corners"] + row["away_corners"]
 
     # Inject bookmaker odds for value bet backtesting
     # Prefer Pinnacle (sharpest), fall back to B365 (most coverage)
