@@ -129,7 +129,6 @@ def predict_for_date(
             # Lineup impact — only when match kicks off within 3 hours
             lineup_impact = None
             try:
-                from datetime import datetime, timezone
                 from algorithms.lineup_impact import fetch_lineup, estimate_impact
                 utc_str   = match.get("utcDate", "")
                 kickoff   = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
