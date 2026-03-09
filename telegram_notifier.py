@@ -63,46 +63,98 @@ def _all_vbs(all_data: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Parlay builder (mirrors getSuggestedParlays in index.html)
+# Parlay builder — mirrors calcBestBets() + getSuggestedParlays() in index.html
 # ---------------------------------------------------------------------------
 
-def _build_pool(entries: list[dict], min_stars: int) -> list[dict]:
-    """Unique-per-match pool of bets, sorted by prob DESC."""
+def _calc_best_bets(all_data: dict) -> list[dict]:
+    """
+    Mirror of calcBestBets() in index.html.
+    Returns bets of type victoria/over25/btts sorted by score DESC.
+    score = stars^2 * prob / 100  (same formula as the visualiser)
+    """
+    bets = []
+    for date_str in sorted(all_data):
+        for e in all_data[date_str].get("predictions", []):
+            pred  = e["prediction"]
+            mi    = e["match_info"]
+            stars = pred.get("stars", 1)
+            if stars < 2:
+                continue
+
+            p1 = pred.get("prob_home", 0) * 100
+            px = pred.get("prob_draw", 0) * 100
+            p2 = pred.get("prob_away", 0) * 100
+
+            home_s = _short(mi.get("homeTeam", {}).get("shortName") or mi.get("homeTeam", {}).get("name", "?"))
+            away_s = _short(mi.get("awayTeam", {}).get("shortName") or mi.get("awayTeam", {}).get("name", "?"))
+            date_s = mi.get("utcDate", "")[:10]
+            match_key = date_s + "|" + mi.get("homeTeam", {}).get("name", "")
+
+            # Victoria bet (home or away only, ≥55%)
+            if p1 > px and p1 > p2 and p1 >= 55:
+                bets.append({"entry": e, "type": "victoria", "match_key": match_key,
+                    "label": f"Victoria {home_s}", "prob": p1,
+                    "score": stars * stars * p1 / 100,
+                    "fair_odds": round(100 / p1, 2)})
+            elif p2 > p1 and p2 > px and p2 >= 55:
+                bets.append({"entry": e, "type": "victoria", "match_key": match_key,
+                    "label": f"Victoria {away_s}", "prob": p2,
+                    "score": stars * stars * p2 / 100,
+                    "fair_odds": round(100 / p2, 2)})
+
+            # Over 2.5
+            o25 = pred.get("over25", 0) * 100
+            if pred.get("over25", 0) >= 0.50 and o25 >= 58:
+                bets.append({"entry": e, "type": "over25", "match_key": match_key,
+                    "label": "Over 2.5 Goles", "prob": o25,
+                    "score": stars * stars * o25 / 100,
+                    "fair_odds": round(100 / o25, 2)})
+
+            # BTTS
+            btts = pred.get("btts_prob", 0) * 100
+            if pred.get("btts_prob", 0) >= 0.50 and btts >= 58:
+                bets.append({"entry": e, "type": "btts", "match_key": match_key,
+                    "label": "Ambos Marcan", "prob": btts,
+                    "score": stars * stars * btts / 100,
+                    "fair_odds": round(100 / btts, 2)})
+
+    bets.sort(key=lambda b: b["score"], reverse=True)
+    return bets
+
+
+def _pool_from_bets(bets: list[dict], min_stars: int) -> list[dict]:
+    """Unique-per-match pool sorted by prob DESC — mirrors buildPool() in JS."""
     seen, pool = set(), []
-    for e in entries:
-        pred = e["prediction"]
-        if pred["stars"] < min_stars:
+    for b in sorted(bets, key=lambda b: b["prob"], reverse=True):
+        if b["entry"]["prediction"]["stars"] < min_stars:
             continue
-        mi  = e["match_info"]
-        key = mi.get("utcDate", "")[:10] + "|" + mi.get("homeTeam", {}).get("name", "")
-        if key not in seen:
-            seen.add(key)
-            pool.append(e)
+        if b["match_key"] not in seen:
+            seen.add(b["match_key"])
+            pool.append(b)
     return pool
 
 
-def _parlay_text(legs: list[dict], title: str, emoji: str) -> list[str]:
-    """Format one parlay as a list of message lines."""
-    combined_prob  = 1.0
-    combined_odds  = 1.0
-    has_odds       = True
-    lines          = [f"{emoji} *{title}*"]
+def _parlay_text(bets: list[dict], title: str, emoji: str) -> list[str]:
+    """Format one parlay using bet-specific label/prob/fair_odds."""
+    combined_prob = 1.0
+    combined_odds = 1.0
+    has_odds      = True
+    lines         = [f"{emoji} *{title}*"]
 
-    for e in legs:
-        pred    = e["prediction"]
-        mi      = e["match_info"]
+    for b in bets:
+        pred    = b["entry"]["prediction"]
+        mi      = b["entry"]["match_info"]
         home    = _short(mi.get("homeTeam", {}).get("shortName") or mi.get("homeTeam", {}).get("name", "?"))
         away    = _short(mi.get("awayTeam", {}).get("shortName") or mi.get("awayTeam", {}).get("name", "?"))
-        outcome = _OUTCOME_LABEL.get(pred["best_outcome"], pred["best_outcome"])
-        prob    = pred["best_prob"]
-        fair    = round(1.0 / prob, 2) if prob > 0.01 else None
         stars_e = _STARS_EMOJI.get(pred["stars"], "")
-        combined_prob *= prob
+        prob_f  = b["prob"] / 100
+        fair    = b["fair_odds"]
+        combined_prob *= prob_f
         if fair:
             combined_odds *= fair
         else:
             has_odds = False
-        lines.append(f"  {stars_e} `{home} vs {away}` — *{outcome}* ({prob*100:.0f}%)")
+        lines.append(f"  {stars_e} `{home} vs {away}` — *{b['label']}* ({b['prob']:.0f}%)")
 
     cp_str = f"{combined_prob*100:.1f}%"
     co_str = f"@{combined_odds:.2f}" if has_odds else ""
@@ -110,56 +162,67 @@ def _parlay_text(legs: list[dict], title: str, emoji: str) -> list[str]:
     return lines
 
 
-def _build_parlays(entries: list[dict], vbs: list[dict]) -> list[tuple[str, str, list[dict]]]:
+def _build_parlays(all_data: dict, vbs: list[dict]) -> list[tuple]:
     """
-    Returns list of (title, emoji, legs_entries) for:
-      - Doble Segura   (2 legs, 4★+ pref)
-      - Triple Media   (3 legs, 3★+)
-      - Cuadruple Arriesgada (4 legs, 3★+ / fallback 2★)
-      - Valor EV+      (VB picks, 2-4 legs)
+    Mirror of getSuggestedParlays() in index.html.
+    Returns list of (title, emoji, bets_list).
     """
-    pool4 = _build_pool(entries, 4)
-    pool3 = _build_pool(entries, 3)
-    pool2 = _build_pool(entries, 2)
+    bets  = _calc_best_bets(all_data)
+    pool4 = _pool_from_bets(bets, 4)
+    pool3 = _pool_from_bets(bets, 3)
+    pool2 = _pool_from_bets(bets, 2)
 
     parlays = []
 
-    # Doble
+    # Doble Segura
     dbl = pool4 if len(pool4) >= 2 else pool3
     if len(dbl) >= 2:
         parlays.append(("Doble Segura", "🟢", dbl[:2]))
 
-    # Triple
+    # Triple Media
     if len(pool3) >= 3:
         parlays.append(("Triple Media", "🟡", pool3[:3]))
 
-    # Cuadruple
+    # Cuadruple Arriesgada
     quad = pool3 if len(pool3) >= 4 else pool2
     if len(quad) >= 4:
         parlays.append(("Cuadruple Arriesgada", "🟠", quad[:4]))
 
-    # EV+ (reuse match_info from entries where VBs exist)
-    # Build index: (home_name, away_name) -> entry
-    entry_index = {}
-    for e in entries:
-        mi = e["match_info"]
-        key = (mi.get("homeTeam", {}).get("name", ""), mi.get("awayTeam", {}).get("name", ""))
-        entry_index[key] = e
+    # EV+ — best VB per match, sorted by edge, ≥3★
+    entry_idx = {}
+    for b in bets:
+        mk = b["match_key"]
+        if mk not in entry_idx:
+            entry_idx[mk] = b["entry"]
 
-    ev_legs, ev_seen = [], set()
+    ev_bets, ev_seen = [], set()
     for vb in sorted(vbs, key=lambda v: v.get("edge", 0), reverse=True):
-        if len(ev_legs) >= 4:
+        if len(ev_bets) >= 4:
             break
-        key = (vb.get("home_name", ""), vb.get("away_name", ""))
-        if key in ev_seen:
+        mi   = None
+        # find entry by home/away name
+        home_n = vb.get("home_name", "")
+        away_n = vb.get("away_name", "")
+        for b in bets:
+            bmi = b["entry"]["match_info"]
+            if (bmi.get("homeTeam", {}).get("name", "") == home_n and
+                    bmi.get("awayTeam", {}).get("name", "") == away_n):
+                mi = b
+                break
+        if not mi or mi["match_key"] in ev_seen:
             continue
-        e = entry_index.get(key)
-        if e and e["prediction"]["stars"] >= 3:
-            ev_seen.add(key)
-            ev_legs.append((e, vb))
+        if mi["entry"]["prediction"]["stars"] < 3:
+            continue
+        ev_seen.add(mi["match_key"])
+        ev_bets.append({"entry": mi["entry"], "type": "victoria",
+            "match_key": mi["match_key"],
+            "label": _OUTCOME_LABEL.get(vb.get("outcome", ""), vb.get("outcome", "")),
+            "prob": round(vb.get("model_prob", 0) * 100, 1),
+            "score": 0,
+            "fair_odds": round(vb["bk_odds"], 2) if vb.get("bk_odds") else None})
 
-    if len(ev_legs) >= 2:
-        parlays.append(("Valor EV+", "💰", [leg[0] for leg in ev_legs]))
+    if len(ev_bets) >= 2:
+        parlays.append(("Valor EV+", "💰", ev_bets))
 
     return parlays
 
@@ -297,9 +360,8 @@ def _msg_winiela(all_data: dict) -> str:
 
 def _msg_parlays(all_data: dict) -> list[str]:
     """Messages 3+: one message per parlay type."""
-    entries = _all_entries(all_data)
     vbs     = _all_vbs(all_data)
-    parlays = _build_parlays(entries, vbs)
+    parlays = _build_parlays(all_data, vbs)
 
     if not parlays:
         return []
@@ -312,8 +374,8 @@ def _msg_parlays(all_data: dict) -> list[str]:
         if not group:
             continue
         lines = ["🎰 *Combinadas sugeridas*\n"]
-        for title, emoji, legs in group:
-            lines.extend(_parlay_text(legs, title, emoji))
+        for title, emoji, bets in group:
+            lines.extend(_parlay_text(bets, title, emoji))
             lines.append("")
         lines.append("_Solo informativo · Apuesta con responsabilidad_")
         messages.append("\n".join(lines))
