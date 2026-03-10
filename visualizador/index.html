@@ -3575,8 +3575,15 @@ function renderSlipView() {
             <div style="color:var(--muted);font-size:11px">Retorno potencial</div>
             <div id="comb-return" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:700;color:var(--accent-green)">€${(10*combinedOdds).toFixed(2)}</div>
           </div>
-          <button class="slip-cta" onclick="placeCombinada()" ${!brl?'disabled':''} style="margin-left:auto">✅ Registrar combinada</button>
+          <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
+            <button id="ollama-risk-btn" onclick="analyzeRiskWithOllama()"
+              style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 18px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">
+              🤖 Analizar riesgo
+            </button>
+            <button class="slip-cta" onclick="placeCombinada()" ${!brl?'disabled':''}>✅ Registrar combinada</button>
+          </div>
         </div>
+        <div id="ollama-risk-box" class="ollama-box" style="display:none;margin:12px 0 0"></div>
       </div>`;
     }
   }
