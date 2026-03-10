@@ -10,13 +10,61 @@ maximum-likelihood estimation, with:
 Outputs a full scoreline probability matrix → 1X2, Over/Under, BTTS.
 """
 
+import glob
+import hashlib
+import json
 import math
+import os
 from typing import Optional
 import numpy as np
 from scipy.optimize import minimize
 from datetime import datetime, date
 
 from config import DC_XI, DC_XI_BY_LEAGUE, DC_RHO, HOME_ADVANTAGE
+
+_DC_CACHE_DIR = "cache"
+_DC_CACHE_PREFIX = "dc_params_"
+
+
+def _params_cache_key(matches: list[dict], reference_date: date) -> str:
+    """
+    Fast fingerprint for cache invalidation.
+
+    Hashes: total match count + reference_date + last 100 match dates.
+    Cheap to compute (~1ms), sensitive to any new data fetched.
+    """
+    tail = sorted(m.get("utcDate", "")[:10] for m in matches[-100:])
+    raw  = f"{len(matches)}|{reference_date}|{''.join(tail)}"
+    return hashlib.md5(raw.encode()).hexdigest()[:16]
+
+
+def _load_dc_cache(key: str) -> dict | None:
+    path = os.path.join(_DC_CACHE_DIR, f"{_DC_CACHE_PREFIX}{key}.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+        # Restore integer team-ID keys (JSON serialises them as strings)
+        for league_key, params in raw.items():
+            if isinstance(params, dict):
+                for d in ("alpha", "beta"):
+                    if d in params:
+                        params[d] = {int(k): v for k, v in params[d].items()}
+        return raw
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError):
+        return None
+
+
+def _save_dc_cache(key: str, params: dict) -> None:
+    os.makedirs(_DC_CACHE_DIR, exist_ok=True)
+    # Remove stale cache files (keep only the latest)
+    for old in glob.glob(os.path.join(_DC_CACHE_DIR, f"{_DC_CACHE_PREFIX}*.json")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    path = os.path.join(_DC_CACHE_DIR, f"{_DC_CACHE_PREFIX}{key}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(params, f)
 
 
 def _weight(match_date_str: str, reference_date: date, dc_xi: float = DC_XI) -> float:
@@ -197,6 +245,15 @@ def fit_per_league(matches: list[dict], reference_date: Optional[date] = None) -
     if reference_date is None:
         reference_date = date.today()
 
+    # Cache hit: if historical data hasn't changed since last run, skip fitting
+    _cache_key = _params_cache_key(matches, reference_date)
+    _cached    = _load_dc_cache(_cache_key)
+    if _cached is not None:
+        n_leagues = sum(1 for k in _cached if k != "_global" and _cached[k])
+        print(f"    DC [cache]: {n_leagues} ligas cargadas sin re-ajuste "
+              f"(datos sin cambios)")
+        return _cached
+
     by_league: dict[str, list] = defaultdict(list)
     for m in matches:
         code = m.get("_league_code")
@@ -216,6 +273,8 @@ def fit_per_league(matches: list[dict], reference_date: Optional[date] = None) -
 
     # Global fallback for teams not found in any per-league model
     result["_global"] = fit(matches, reference_date)
+
+    _save_dc_cache(_cache_key, result)
     return result
 
 

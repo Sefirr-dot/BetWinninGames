@@ -14,6 +14,7 @@ import csv
 import os
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -206,33 +207,42 @@ def fetch_window(
     date_set = set(dates)
     by_date: dict[str, list[dict]] = {d: [] for d in dates}
 
-    for code, sport_key in leagues.items():
-        try:
-            events, remaining = _fetch_sport(sport_key)
-            matched = 0
-            for ev in events:
-                ev_date = ev.get("commence_time", "")[:10]
-                if ev_date not in date_set:
-                    continue
-                odds = _best_odds(ev)
-                if odds is None:
-                    continue
-                row = {
-                    "home_team": ev["home_team"],
-                    "away_team": ev["away_team"],
-                    "odds_1":    round(odds["odds_1"], 2),
-                    "odds_x":    round(odds["odds_x"], 2),
-                    "odds_2":    round(odds["odds_2"], 2),
-                    "odds_o25":  round(odds["odds_o25"], 2) if odds.get("odds_o25") else "",
-                }
-                by_date[ev_date].append(row)
-                matched += 1
-            print(f"    [{code}] {matched} partidos con cuotas  "
-                  f"(quota restante: {remaining})")
-        except requests.HTTPError as e:
-            print(f"    [{code}] HTTP error: {e}")
-        except Exception as e:
-            print(f"    [{code}] Error: {e}")
+    def _process_league(code: str, sport_key: str) -> tuple[str, list[dict], str]:
+        """Fetch + parse one league. Returns (code, rows, remaining)."""
+        events, remaining = _fetch_sport(sport_key)
+        rows, matched = [], 0
+        for ev in events:
+            ev_date = ev.get("commence_time", "")[:10]
+            if ev_date not in date_set:
+                continue
+            odds = _best_odds(ev)
+            if odds is None:
+                continue
+            rows.append((ev_date, {
+                "home_team": ev["home_team"],
+                "away_team": ev["away_team"],
+                "odds_1":    round(odds["odds_1"], 2),
+                "odds_x":    round(odds["odds_x"], 2),
+                "odds_2":    round(odds["odds_2"], 2),
+                "odds_o25":  round(odds["odds_o25"], 2) if odds.get("odds_o25") else "",
+            }))
+            matched += 1
+        print(f"    [{code}] {matched} partidos con cuotas  "
+              f"(quota restante: {remaining})")
+        return code, rows, remaining
+
+    # Fetch all leagues in parallel (network-bound, GIL released during I/O)
+    with ThreadPoolExecutor(max_workers=len(leagues)) as executor:
+        futures = {executor.submit(_process_league, code, sk): code
+                   for code, sk in leagues.items()}
+        for fut in as_completed(futures):
+            try:
+                _, rows, _ = fut.result()
+                for ev_date, row in rows:
+                    by_date[ev_date].append(row)
+            except Exception as e:
+                code = futures[fut]
+                print(f"    [{code}] Error: {e}")
 
     os.makedirs(ODDS_DIR, exist_ok=True)
     written = []
@@ -292,48 +302,49 @@ def fetch_pinnacle_snapshots(
     date_set = set(dates)
     by_date: dict[str, list[dict]] = {d: [] for d in dates}
 
-    for code, sport_key in leagues.items():
-        try:
-            url = f"{_BASE}/sports/{sport_key}/odds/"
-            params = {
-                "apiKey":      ODDS_API_KEY,
-                "bookmakers":  "pinnacle",   # Pinnacle only — replaces regions
-                "markets":     "h2h",
-                "dateFormat":  "iso",
-                "oddsFormat":  "decimal",
-            }
-            resp = requests.get(url, params=params, timeout=15)
-            resp.raise_for_status()
-            events = resp.json()
-            remaining = resp.headers.get("x-requests-remaining", "?")
-            matched = 0
-            for ev in events:
-                ev_date = ev.get("commence_time", "")[:10]
-                if ev_date not in date_set:
-                    continue
-                home = ev["home_team"]
-                away = ev["away_team"]
-                best = {"p1": 0.0, "px": 0.0, "p2": 0.0}
-                for bk in ev.get("bookmakers", []):
-                    for mkt in bk.get("markets", []):
-                        if mkt["key"] == "h2h":
-                            by_name = {o["name"]: o["price"] for o in mkt["outcomes"]}
-                            best["p1"] = max(best["p1"], by_name.get(home, 0.0))
-                            best["px"] = max(best["px"], by_name.get("Draw", 0.0))
-                            best["p2"] = max(best["p2"], by_name.get(away, 0.0))
-                if min(best["p1"], best["px"], best["p2"]) <= 1.0:
-                    continue
-                by_date[ev_date].append({
-                    "home_team": home,
-                    "away_team": away,
-                    "pin_1": round(best["p1"], 2),
-                    "pin_x": round(best["px"], 2),
-                    "pin_2": round(best["p2"], 2),
-                })
-                matched += 1
-            print(f"    [Pinnacle/{code}] {matched} partidos  (quota: {remaining})")
-        except Exception as e:
-            print(f"    [Pinnacle/{code}] Error: {e}")
+    def _fetch_pinnacle_league(code: str, sport_key: str) -> tuple[str, list[tuple]]:
+        url = f"{_BASE}/sports/{sport_key}/odds/"
+        p = {"apiKey": ODDS_API_KEY, "bookmakers": "pinnacle",
+             "markets": "h2h", "dateFormat": "iso", "oddsFormat": "decimal"}
+        resp = requests.get(url, params=p, timeout=15)
+        resp.raise_for_status()
+        events   = resp.json()
+        remaining = resp.headers.get("x-requests-remaining", "?")
+        rows, matched = [], 0
+        for ev in events:
+            ev_date = ev.get("commence_time", "")[:10]
+            if ev_date not in date_set:
+                continue
+            home = ev["home_team"]; away = ev["away_team"]
+            best = {"p1": 0.0, "px": 0.0, "p2": 0.0}
+            for bk in ev.get("bookmakers", []):
+                for mkt in bk.get("markets", []):
+                    if mkt["key"] == "h2h":
+                        by_name = {o["name"]: o["price"] for o in mkt["outcomes"]}
+                        best["p1"] = max(best["p1"], by_name.get(home, 0.0))
+                        best["px"] = max(best["px"], by_name.get("Draw", 0.0))
+                        best["p2"] = max(best["p2"], by_name.get(away, 0.0))
+            if min(best["p1"], best["px"], best["p2"]) <= 1.0:
+                continue
+            rows.append((ev_date, {"home_team": home, "away_team": away,
+                                   "pin_1": round(best["p1"], 2),
+                                   "pin_x": round(best["px"], 2),
+                                   "pin_2": round(best["p2"], 2)}))
+            matched += 1
+        print(f"    [Pinnacle/{code}] {matched} partidos  (quota: {remaining})")
+        return code, rows
+
+    with ThreadPoolExecutor(max_workers=len(leagues)) as executor:
+        futures = {executor.submit(_fetch_pinnacle_league, code, sk): code
+                   for code, sk in leagues.items()}
+        for fut in as_completed(futures):
+            try:
+                _, rows = fut.result()
+                for ev_date, row in rows:
+                    by_date[ev_date].append(row)
+            except Exception as e:
+                code = futures[fut]
+                print(f"    [Pinnacle/{code}] Error: {e}")
 
     os.makedirs(_PINNACLE_DIR, exist_ok=True)
     written = []
