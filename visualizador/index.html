@@ -2061,13 +2061,38 @@ function renderWinielaView() {
             <span class="parlay-stat-label">Cuota combinada</span>
             <span class="parlay-stat-val gold">@${winiela.combinedOdds}</span>
           </div>` : ''}
+          <div style="margin-left:auto">
+            <button id="winiela-slip-btn"
+              style="background:var(--accent-teal);border:none;border-radius:7px;padding:7px 16px;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:#000;cursor:pointer">
+              🎯 Añadir al bankroll
+            </button>
+          </div>
           <div class="parlay-disclaimer">¡Solo por diversión! · Apuesta con responsabilidad</div>
         </div>
       </div>
     </div>`;
+
+  // Attach click after render (avoids quoting issues with team names)
+  const btn = container.querySelector('#winiela-slip-btn');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      loadParlayToSlip(winiela.legs.map(l => ({
+        homeName:  l.match.home  || l.match.homeShort,
+        awayName:  l.match.away  || l.match.awayShort,
+        league:    l.match.league,
+        matchDate: l.match.date,
+        outcome:   l.pick === '1' ? 'home' : l.pick === '2' ? 'away'
+                   : l.pick === 'X' ? 'draw' : l.pick === 'O25' ? 'over25' : 'btts',
+        oddsUser:  l.odds || 2.0,
+      })));
+    });
+  }
 }
 
+let _parlayCache = []; // reset each render to avoid stale references
+
 function renderBestBetsView(bets) {
+  _parlayCache = [];
   const container = document.getElementById('best-bets-container');
   const parlays  = getSuggestedParlays(bets);
   const maxScore = bets.length ? bets[0].score : 1;
@@ -2080,6 +2105,17 @@ function renderBestBetsView(bets) {
   };
 
   function renderParlayBox(parlay) {
+    // Cache normalized legs for safe onclick reference (avoids quoting issues with team names)
+    _parlayCache.push(parlay.legs.map(b => ({
+      homeName:  b.match.home  || b.match.homeShort,
+      awayName:  b.match.away  || b.match.awayShort,
+      league:    b.match.league,
+      matchDate: b.match.date,
+      outcome:   b.type === 'over25' ? 'over25' : b.type === 'btts' ? 'btts'
+                 : winnerTeam(b.match) === 'home' ? 'home'
+                 : winnerTeam(b.match) === 'away' ? 'away' : 'draw',
+      oddsUser:  b.fairOdds ? parseFloat(b.fairOdds) : 2.0,
+    })));
     const meta = RISK_META[parlay.riskLevel] || RISK_META.medium;
     const legsHtml = parlay.legs.map((b, i) => {
       const d = b.match.date.split('-');
@@ -2118,6 +2154,12 @@ function renderBestBetsView(bets) {
               <span class="parlay-stat-label">Cuota combinada</span>
               <span class="parlay-stat-val gold">@${parlay.combinedOdds}</span>
             </div>` : ''}
+            <div style="margin-left:auto">
+              <button data-parlay-idx="${_parlayCache.length - 1}" onclick="loadParlayToSlip(_parlayCache[+this.dataset.parlayIdx])"
+                style="background:var(--accent-teal);border:none;border-radius:7px;padding:7px 16px;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:#000;cursor:pointer">
+                🎯 Añadir al bankroll
+              </button>
+            </div>
             <div class="parlay-disclaimer">Solo informativo · Apuesta con responsabilidad</div>
           </div>
         </div>
@@ -3546,6 +3588,28 @@ function renderSlipView() {
     const box = document.getElementById('ollama-risk-box');
     if (box) box.style.display = 'none'; // reset each render
   }
+}
+
+// ── Load a pre-built parlay into the slip (from Top Picks / Winiela) ──
+function loadParlayToSlip(legs) {
+  if (!loadBankroll()) { document.getElementById('bankroll-modal').style.display = 'flex'; return; }
+  if (!legs.length) return;
+  const newSlip = legs.map(leg => ({
+    id: Date.now() + Math.random() + '',
+    homeName:  leg.homeName,
+    awayName:  leg.awayName,
+    league:    leg.league,
+    matchDate: leg.matchDate,
+    outcome:   leg.outcome,
+    oddsUser:  leg.oddsUser || 2.0,
+    stake:     +(( (loadBankroll()?.current || 100) * 0.02 ).toFixed(2)),
+    kellyStake: null,
+    addedAt:   new Date().toISOString(),
+  }));
+  saveSlip(newSlip);
+  _slipTab = 'combined';
+  activeDate = 'SLIP';
+  render();
 }
 
 // ── On page load: init bankroll + settle pending bets ──
