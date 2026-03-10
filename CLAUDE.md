@@ -229,19 +229,28 @@ All entry-point scripts call `sys.stdout.reconfigure(encoding="utf-8")` at start
 ### Bankroll curve staking
 `tracker.py` and `backtest.py` use **proportional staking**: `unit_stake = 1 / n_bets`. Never switch to flat 1-unit stakes.
 
-### Backtest-derived calibration (current baseline: 2023+2024 seasons)
+### Backtest-derived calibration (current baseline: 2023+2024 seasons, 6595 matches)
+
+**All picks:**
 Global: Accuracy=51.8%, Brier=0.5927, ROI=-2.9% (at fair odds).
 Per league: PL=-1.7%, PD=-1.3%, BL1=-6.5%, FL1=-2.7%.
-ROI is negative at fair odds by design — real edge comes from value bets against market odds.
 
-Draw model pretrain (6595 matches): tasa_draw=0.249, loss=0.5577.
-Weights: bias=-1.86, dc=+2.29, elo=+1.61, h2h=+0.10, mkt=-0.62.
-Interpretation: DC and Elo draw probs are the strongest predictors; market draw implied prob slightly corrects downward (market overprices draws).
+**5★ picks only (817 picks, 12.4% of total) — the real betting baseline:**
+Global: Accuracy=71.1%, Brier=0.4554, ROI=+9.0%.
+Per league: PL=+9.7%, PD=+15.9%, BL1=+9.2%, FL1=-1.6%.
 
-Over25 model pretrain (6595 matches): tasa_over25=~0.52, loss converged.
-Weights: bias=-0.896, mc_over25=+4.087, lam_plus_mu=-0.206, btts_prob=-1.009.
-Interpretation: MC over25 is the dominant predictor; btts_prob=-1.009 corrects downward
-when both teams are likely to score (1-1 style game has BTTS but not Over2.5).
+ROI is negative at fair odds for all picks by design — the edge concentrates in 5★ picks.
+At market odds (value bets), the edge is additional on top of the +9% fair-odds baseline.
+
+Draw model pretrain (6595 matches, L2=0.01): tasa_draw=0.249, loss=0.5606.
+Weights: bias=-1.15, dc=+0.10, elo=+0.04, h2h=+0.04, mkt=-0.0003.
+L2 regularisation shrinks feature weights toward zero — model outputs ~24% draw for all matches
+(bias-dominated). This acts as an implicit quality filter: fewer 5★ picks (817 vs 993 pre-L2)
+but dramatically higher precision. BL1 improved from +0.7% to +9.2% after L2.
+
+Over25 model pretrain (6595 matches, L2=0.01): tasa_over25=0.537, loss=0.6796.
+Weights: bias=-1.18, mc_over25=+0.04, lam_plus_mu=+0.46, btts_prob=+0.03.
+After L2, lam+mu becomes the dominant feature (more stable than raw MC over25).
 
 ### meta_learner distribution shift
 `source='live'` vs `source='backtest'` column separates real picks from seeds. `meta_learner.train(real_only=True)` enforces this. If predictions look wrong: `rename cache\meta_learner.pkl cache\meta_learner.pkl.bak`.
