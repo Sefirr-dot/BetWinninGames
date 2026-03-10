@@ -36,6 +36,12 @@ python backtest.py --league ALL --seasons 2023 2024   # → also writes cache/dr
 
 # Re-train draw model manually on live picks (>= 50 resolved required)
 python -c "from algorithms.draw_model import train; print(train('cache/picks_history.db'))"
+
+# Re-train over25 calibrator manually (>= 50 resolved required)
+python -c "from algorithms.over25_model import train; print(train('cache/picks_history.db'))"
+
+# Regenerate results.js for the frontend bankroll tracker (auto-runs inside tracker.py)
+python -c "import db_picks, tracker; picks=db_picks.get_all_picks('cache/picks_history.db'); tracker._save_results_js(picks)"
 ```
 
 After running, open `visualizador/index.html` directly in a browser (no server needed).
@@ -67,6 +73,8 @@ All keys live in `config.py` (gitignored — copy from `config.example.py`):
 6. **Predict** — `ensemble.predict_match()` per match → `rank_predictions()`. Lineup check fires automatically when kickoff < 3h.
 7. **AI Advisor** — `ai_advisor.enrich_predictions()` calls Ollama with Google News headlines. `think:False` required for Qwen3 models.
 8. **Report** — `value_detector.find_edges()` → `reporter.generate_js()` → `db_picks.save_picks()` → `tracker.run_tracker()`.
+
+**Performance notes**: `dixon_coles.fit_per_league()` caches fitted params to `cache/dc_params_{hash}.json` — same-day reruns skip fitting entirely. `odds_fetcher` uses `ThreadPoolExecutor` to fire all 8 API calls (4 regular + 4 Pinnacle) in parallel.
 
 ### algorithms/ sub-models
 
@@ -128,6 +136,8 @@ picks (match_id PK, run_date, match_date, home_team, away_team, league,
 
 `tracker._save_metrics_json()` persists a snapshot to `cache/tracker_metrics.json` after each run — consumed by `value_detector.py` for dynamic Kelly sizing.
 
+`tracker._save_results_js()` writes `visualizador/data/results.js` (`var RESOLVED_RESULTS = {...}`) keyed by `"home|away|date"` — consumed by the frontend bankroll tracker for automatic bet settlement.
+
 ### Dynamic Kelly by league
 
 `algorithms/value_detector.py` loads `cache/tracker_metrics.json` at import time. If a league has ≥20 resolved picks, it computes:
@@ -169,13 +179,28 @@ Beyond the original fields, each match object now includes:
 
 ### Visualizer (`visualizador/index.html`)
 
-Single-file static app. State persisted via `localStorage` (`bwg_state` key).
+Single-file static app (~3600 lines). No build step — open directly in browser.
 
-Views: `activeDate` = date string / `"ALL"` / `"BEST"` / `"VALUE"` / `"TRACK"` / `"BACK"` / `"WIN"` / `"BETNOW"`.
+**Views** (`activeDate`): date string / `"ALL"` / `"BEST"` / `"VALUE"` / `"TRACK"` / `"BACK"` / `"WIN"` / `"BETNOW"` / `"SLIP"`.
+
+State persisted via `localStorage`:
+- `bwg_state` — `{activeDate, activeLeague, sortMode}` — navigation state
+- `bwg_bankroll` — `{initial, current, setAt}` — persistent bankroll (set once on first visit)
+- `bwg_slip` — array of pending picks to bet (cleared after `placeBets()`)
+- `bwg_history` — full bet history with settlement status and P&L
+
+**SLIP view** (v5.0 bankroll tracker):
+- First visit: modal asks for initial bankroll, saved to `bwg_bankroll`, never asked again
+- Each match card has "+ Local / + Empate / + Visitante / + Over 2.5 / + BTTS" buttons → `addToSlip()`
+- Slip tabs: **Activo** (edit odds/stake per pick, Kelly warning when >1.5×), **Historial** (P&L curve + bet list), **Combinada** (parlay builder with auto combined odds)
+- Auto-settlement: on page load, crosses `RESOLVED_RESULTS` (from `results.js`) against `bwg_history`; resolves simple bets and combinadas automatically
+- **Ollama risk analysis**: button calls `http://localhost:11434/api/chat` directly from the browser (no server needed) with `think:false, stream:false`
 
 Match modal shows: sub-model breakdown, score grid heatmap, context tags, stats (Over 1.5/2.5/3.5/4.5, BTTS+O25, Asian HCap), H2H, value bets with sharp money flag + Pinnacle CLV, AI advisor note.
 
 TRACK view shows: global metrics, per-league table, per-stars table, **ROI per context tag**, bankroll curve, calibration diagram, sub-model accuracy.
+
+**Adding a new view**: add a container div in HTML, add an item to `buildSidebar()` items array, add dispatch in `render()`, add `"VIEWID"` to the `activeDate` validation list in state init.
 
 ### Scheduler (Windows Task Scheduler)
 
@@ -223,3 +248,17 @@ when both teams are likely to score (1-1 style game has BTTS but not Over2.5).
 
 ### over25_model / draw_model source guard
 `cache/draw_model.json` and `cache/over25_model.json` both have a `"source"` field: `"backtest_pretrain"` or `"live"`. Running backtest again will NOT overwrite a live-trained model. To reset: delete the file and re-run backtest.
+
+### DC params cache
+`cache/dc_params_{hash16}.json` — fitted params keyed by md5(match_count + ref_date + last 100 match dates). Invalidated automatically when new matches are fetched. Delete manually to force a cold re-fit.
+
+### Anti-draw squeeze
+`value_detector.find_edges()` computes `mkt_draw_clean - model_draw`. If gap > `ANTIDRAW_SQUEEZE_THRESHOLD` (5%), home/away bets for that match get up to `ANTIDRAW_EDGE_BONUS_MAX` (4%) added to effective edge. Only applies to home/away outcomes, not draw/over25/btts. Exposed as `antidraw_squeeze` field in value bet dicts.
+
+### Live pick counts (as of v5.0)
+75 live picks total, 38 resolved. Models requiring live data:
+- `draw_model`: needs ≥50 resolved → **active** (36 live resolved at pretrain; retrained from backtest)
+- `over25_model`: needs ≥50 resolved → **active** (pretrained from backtest)
+- `calibrator`: needs ≥200 resolved → **inactive**
+- `meta_learner`: needs ≥200 resolved → **inactive**
+- `model_weights` optimizer: needs ≥50 resolved → **may activate soon**
