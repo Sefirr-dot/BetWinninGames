@@ -42,9 +42,19 @@ python -c "from algorithms.over25_model import train; print(train('cache/picks_h
 
 # Regenerate results.js for the frontend bankroll tracker (auto-runs inside tracker.py)
 python -c "import db_picks, tracker; picks=db_picks.get_all_picks('cache/picks_history.db'); tracker._save_results_js(picks)"
+
+# Backtest filtered to high-confidence picks only (recommended for realistic performance view)
+python backtest.py --league ALL --seasons 2023 2024 --min-stars 5
+python backtest.py --league FL1 --seasons 2023 2024 --min-stars 4
 ```
 
-After running, open `visualizador/index.html` directly in a browser (no server needed).
+Open the visualizer via the local HTTP server (required for Ollama CORS):
+```bash
+run_visualizer.bat   # starts python -m http.server 8080 --bind 127.0.0.1, opens browser
+# or manually:
+cd visualizador && python -m http.server 8080 --bind 127.0.0.1
+```
+> Opening `index.html` directly as `file://` blocks Ollama AI risk analysis due to CORS.
 
 ## Dependencies
 
@@ -93,8 +103,8 @@ All keys live in `config.py` (gitignored — copy from `config.example.py`):
 | `fatigue` | n/a | Multiplicative penalty on λ/μ. ≥7 days → 1.0; ≤1 day → 0.82. |
 | `cards` | n/a | Display-only linear proxy. |
 | `meta_learner` | override | XGBoost. **Only trains on `source='live'` picks** (never on backtest seeds). Activated when `cache/meta_learner.pkl` exists. Skips Platt calibration when active. |
-| `draw_model` | n/a | Logistic regression (scipy) draw classifier. Features: `dc_draw`, `elo_draw`, `h2h_draw`, `mkt_draw`. **Replaces** the hand-tuned draw nudge in ensemble when `cache/draw_model.json` exists. Pre-trains from backtest automatically; fine-tunes on live picks (≥50) via tracker. `source` field in JSON distinguishes `backtest_pretrain` vs `live` — live model is never overwritten by backtest. |
-| `over25_model` | n/a | Logistic regression calibrator for Over 2.5. Features: `mc_over25` (MC raw), `lam+mu`, `btts_prob`. **Replaces** raw MC over25 output when `cache/over25_model.json` exists. Same train/pretrain/source-guard pattern as draw_model. |
+| `draw_model` | n/a | Logistic regression + **L2=0.01** draw classifier. Features: `dc_draw`, `elo_draw`, `h2h_draw`, `mkt_draw`. **Replaces** the hand-tuned draw nudge in ensemble when `cache/draw_model.json` exists. L2 acts as implicit pick filter — shrinks feature weights toward zero, outputting ~24% draw constant, which concentrates 5★ picks on clearest home/away wins (+6.6pp ROI gain). Pre-trains from backtest automatically; fine-tunes on live picks (≥50) via tracker. `source` field: `backtest_pretrain` vs `live`. |
+| `over25_model` | n/a | Logistic regression + **L2=0.01** calibrator for Over 2.5. Features: `mc_over25` (MC raw), `lam+mu`, `btts_prob`. After L2, `lam+mu` dominates over raw MC. **Replaces** raw `mc["over25"]` output when `cache/over25_model.json` exists. Same source-guard pattern as draw_model. |
 | `match_context` | n/a | `classify(elo_pred, form_pred, h2h_pred, home_pos, away_pos)` → tags list. Tags: `even_match`, `top6_clash`, `relegation_6ptr`, `home_in_form`, `away_in_form`, `h2h_dominant`. Combined with `motivation` tags in `_tags`. |
 
 ### Calibrator and weight optimizer (auto-loading)
@@ -191,10 +201,13 @@ State persisted via `localStorage`:
 
 **SLIP view** (v5.0 bankroll tracker):
 - First visit: modal asks for initial bankroll, saved to `bwg_bankroll`, never asked again
-- Each match card has "+ Local / + Empate / + Visitante / + Over 2.5 / + BTTS" buttons → `addToSlip()`
-- Slip tabs: **Activo** (edit odds/stake per pick, Kelly warning when >1.5×), **Historial** (P&L curve + bet list), **Combinada** (parlay builder with auto combined odds)
-- Auto-settlement: on page load, crosses `RESOLVED_RESULTS` (from `results.js`) against `bwg_history`; resolves simple bets and combinadas automatically
-- **Ollama risk analysis**: button calls `http://localhost:11434/api/chat` directly from the browser (no server needed) with `think:false, stream:false`
+- Each match card has `+` outcome buttons → `addToSlip()`
+- Slip tabs: **Active** (edit odds/stake, Kelly warning >1.5×), **History** (personal stats + expandable P&L), **Parlay** (auto combined odds)
+- Auto-settlement on page load: crosses `RESOLVED_RESULTS` (from `results.js`) against `bwg_history`
+- **Ollama risk analysis**: browser calls `localhost:11434/api/chat` directly (`think:false, stream:false`)
+- Top Picks and Quiniela views have "Add to bankroll" buttons that load parlays directly into the Parlay tab
+
+**i18n**: `const LANG = navigator.language.startsWith('es') ? 'es' : 'en'` at script top. `T{}` dict + `_t(key)` helper. Translations cover sidebar, buttons, badges, outcome labels, stats headers. All new UI strings must use `_t()` — never hardcode Spanish or English text directly in template literals.
 
 Match modal shows: sub-model breakdown, score grid heatmap, context tags, stats (Over 1.5/2.5/3.5/4.5, BTTS+O25, Asian HCap), H2H, value bets with sharp money flag + Pinnacle CLV, AI advisor note.
 
@@ -212,14 +225,15 @@ Both log to `logs/` with date-stamped filenames.
 ## Key config knobs
 
 `MODEL_WEIGHTS`: DC=0.58, Elo=0.27, Form=0.00, BTTS=0.05, Corners=0.05, H2H=0.05.
-`BTTS_PRIOR_BLEND=0.25`, `BTTS_RATE_BY_LEAGUE` — per-league BTTS historical rates.
-`FORM_WINDOW=6`, `FORM_DECAY=0.95` — short recent form window.
-`DC_XI_BY_LEAGUE` — temporal decay (BL1=0.006 after tuning, was 0.007).
-`ELO_HOME_BONUS_BY_LEAGUE` — BL1=92 after tuning (was 80).
-`DRAW_RATE_BY_LEAGUE` — BL1=0.248 after tuning (was 0.230).
+`DC_XI_BY_LEAGUE` — temporal decay: PL=0.0075, PD=0.0055, BL1=0.006, **FL1=0.0055** (lowered from 0.0065 — more history smooths PSG outlier effect).
+`ELO_HOME_BONUS_BY_LEAGUE` — PL=90, PD=110, BL1=92, FL1=95.
 `MARKET_BLEND_WEIGHT=0.20` — reduced to 25%/50% for stale odds (>6h/>2h old).
-`VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE` — PL/PD/FL1=8%, BL1=15% (raised from 12% due to -6.5% backtest ROI).
-`ANTIDRAW_SQUEEZE_THRESHOLD=0.05`, `ANTIDRAW_SQUEEZE_FACTOR=0.40`, `ANTIDRAW_EDGE_BONUS_MAX=0.04` — when market draw prob exceeds model draw by >5%, home/away bets get up to +4% edge bonus (exploits draw_model mkt weight=-0.62).
+
+**Value bet thresholds** (derived from `--min-stars 5` backtest):
+`VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE` — PL/PD=8%, BL1=15%, **FL1=13%** (raised from 8%).
+`VALUE_BET_MIN_STARS_BY_LEAGUE` — PL/PD=3★, **BL1/FL1=5★** (lower tiers unprofitable at fair odds).
+
+`ANTIDRAW_SQUEEZE_THRESHOLD=0.05`, `ANTIDRAW_SQUEEZE_FACTOR=0.40`, `ANTIDRAW_EDGE_BONUS_MAX=0.04` — when market draw prob exceeds model draw by >5%, home/away bets get up to +4% edge bonus.
 
 ## Notes
 
@@ -265,9 +279,12 @@ After L2, lam+mu becomes the dominant feature (more stable than raw MC over25).
 `value_detector.find_edges()` computes `mkt_draw_clean - model_draw`. If gap > `ANTIDRAW_SQUEEZE_THRESHOLD` (5%), home/away bets for that match get up to `ANTIDRAW_EDGE_BONUS_MAX` (4%) added to effective edge. Only applies to home/away outcomes, not draw/over25/btts. Exposed as `antidraw_squeeze` field in value bet dicts.
 
 ### Live pick counts (as of v5.0)
-75 live picks total, 38 resolved. Models requiring live data:
-- `draw_model`: needs ≥50 resolved → **active** (36 live resolved at pretrain; retrained from backtest)
-- `over25_model`: needs ≥50 resolved → **active** (pretrained from backtest)
-- `calibrator`: needs ≥200 resolved → **inactive**
-- `meta_learner`: needs ≥200 resolved → **inactive**
-- `model_weights` optimizer: needs ≥50 resolved → **may activate soon**
+75 live picks total, ~40 resolved. Models requiring live data:
+- `draw_model` / `over25_model`: need ≥50 resolved → **active** (pretrained from backtest, L2=0.01)
+- `model_weights` optimizer: needs ≥50 resolved → **activating soon**
+- `calibrator` / `meta_learner`: need ≥200 resolved → **inactive**
+
+### Security
+`run_visualizer.bat` binds to `127.0.0.1` only — not accessible from local network.
+`visualizador/data/results.js` is gitignored (added in v5.0 alongside other generated data files).
+All API calls go through Python — no keys ever reach the browser.
