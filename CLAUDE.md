@@ -56,6 +56,19 @@ cd visualizador && python -m http.server 8080 --bind 127.0.0.1
 ```
 > Opening `index.html` directly as `file://` blocks Ollama AI risk analysis due to CORS.
 
+## First-time setup
+
+```bash
+pip install -r requirements.txt          # Python 3.14+ required
+cp config.example.py config.py           # then fill in API_KEY and ODDS_API_KEY
+
+# Seed historical data + pre-train all models (one-time, ~15 min)
+python backtest.py --league ALL --seasons 2023 2024 --seed-db
+python tracker.py --no-update            # retrain calibrator + weight optimizer with seeds
+```
+
+After this, `cache/` contains all trained models. `main.py` is ready to run.
+
 ## Dependencies
 
 Python 3.14+. Install with `pip install -r requirements.txt`.
@@ -189,7 +202,7 @@ Beyond the original fields, each match object now includes:
 
 ### Visualizer (`visualizador/index.html`)
 
-Single-file static app (~3600 lines). No build step — open directly in browser.
+Single-file static app (~4000 lines). No build step — serve via local HTTP server (see above).
 
 **Views** (`activeDate`): date string / `"ALL"` / `"BEST"` / `"VALUE"` / `"TRACK"` / `"BACK"` / `"WIN"` / `"BETNOW"` / `"SLIP"`.
 
