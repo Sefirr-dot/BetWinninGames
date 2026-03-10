@@ -2703,6 +2703,9 @@ function renderTrackingView() {
 // ── VALUE BETS VIEW ──
 // ── BET NOW VIEW ──
 function renderBetNowView() {
+  // Sync with persistent bankroll system
+  const _brl = loadBankroll();
+  if (_brl) vbBankroll = _brl.current;
   const container = document.getElementById('betnow-container');
   const _ol = { home: 'Victoria Local', draw: 'Empate', away: 'Victoria Visit.', over25: 'Over 2.5', btts: 'Ambos Marcan' };
 
@@ -2807,6 +2810,8 @@ function renderBetNowView() {
 }
 
 function renderValueBetsView() {
+  const _brl = loadBankroll();
+  if (_brl) vbBankroll = _brl.current;
   const container = document.getElementById('vb-container');
   const matches = ALL_MATCHES.filter(m => m.valueBets && m.valueBets.length > 0);
 
