@@ -1338,8 +1338,8 @@ select.sort-select:focus { border-color: #3d6090; }
 <div id="bankroll-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center">
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:36px;max-width:380px;width:90%;text-align:center">
     <div style="font-size:36px;margin-bottom:12px">💰</div>
-    <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;margin-bottom:8px">Define tu bankroll</div>
-    <div style="color:var(--muted);font-size:13px;margin-bottom:24px">Esto se guarda solo una vez. Puedes cambiarlo después desde la vista Bankroll.</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;margin-bottom:8px" id="brl-modal-title">Set your bankroll</div>
+    <div style="color:var(--muted);font-size:13px;margin-bottom:24px" id="brl-modal-sub">Saved once. You can change it later from the Bankroll view.</div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:24px">
       <span style="font-size:22px;color:var(--muted)">€</span>
       <input id="bankroll-init-input" type="number" min="1" max="1000000" step="50" value="1000"
@@ -1369,6 +1369,96 @@ select.sort-select:focus { border-color: #3d6090; }
 <script>if (typeof RESOLVED_RESULTS === 'undefined') window.RESOLVED_RESULTS = {};</script>
 <script src="data/results.js"></script>
 <script>
+// ── LANGUAGE ──
+const LANG = navigator.language.toLowerCase().startsWith('es') ? 'es' : 'en';
+const T = {
+  // Sidebar nav
+  nav_bankroll:  { es: 'Mi Bankroll',   en: 'My Bankroll' },
+  nav_betnow:    { es: 'Bet Now',       en: 'Bet Now' },
+  nav_top:       { es: 'Top Picks',     en: 'Top Picks' },
+  nav_value:     { es: 'Value Bets',    en: 'Value Bets' },
+  nav_track:     { es: 'Rendimiento',   en: 'Performance' },
+  nav_back:      { es: 'Backtest',      en: 'Backtest' },
+  nav_win:       { es: 'Winiela',       en: 'Quiniela' },
+  // Slip tabs
+  tab_active:    { es: 'Slip activo',   en: 'Active slip' },
+  tab_history:   { es: 'Historial',     en: 'History' },
+  tab_combined:  { es: 'Combinada',     en: 'Parlay' },
+  // Slip actions
+  btn_place:     { es: '✅ Registrar bets',       en: '✅ Place bets' },
+  btn_place_comb:{ es: '✅ Registrar combinada',  en: '✅ Place parlay' },
+  btn_ollama:    { es: '🤖 Analizar riesgo',      en: '🤖 Analyze risk' },
+  btn_analyzing: { es: '⏳ Analizando...',        en: '⏳ Analyzing...' },
+  btn_add_bkrl:  { es: '🎯 Añadir al bankroll',  en: '🎯 Add to bankroll' },
+  btn_reset:     { es: 'Resetear',               en: 'Reset' },
+  btn_start:     { es: 'Empezar a trackear',     en: 'Start tracking' },
+  btn_view_pred: { es: 'Ver predicciones',       en: 'View predictions' },
+  // Bankroll modal
+  modal_title:   { es: 'Define tu bankroll',     en: 'Set your bankroll' },
+  modal_sub:     { es: 'Esto se guarda solo una vez. Puedes cambiarlo después desde la vista Bankroll.', en: 'Saved once. You can change it later from the Bankroll view.' },
+  // Badges
+  badge_won:     { es: 'GANADO',     en: 'WON' },
+  badge_lost:    { es: 'PERDIDO',    en: 'LOST' },
+  badge_pending: { es: 'PENDIENTE',  en: 'PENDING' },
+  // Bankroll header labels
+  lbl_bankroll:  { es: 'Bankroll',   en: 'Bankroll' },
+  lbl_pnl:       { es: 'P&L',        en: 'P&L' },
+  lbl_in_play:   { es: 'En juego',   en: 'In play' },
+  // Stats
+  stat_winrate:  { es: 'Win rate',       en: 'Win rate' },
+  stat_roi:      { es: 'ROI real',       en: 'Real ROI' },
+  stat_avgodds:  { es: 'Cuota media',    en: 'Avg odds' },
+  stat_streak:   { es: 'Racha',          en: 'Streak' },
+  stat_settled:  { es: 'Resueltos',      en: 'Settled' },
+  // Section headers
+  sec_pending:   { es: '⏳ Pendientes de resultado', en: '⏳ Awaiting results' },
+  sec_settled:   { es: 'Resueltos',      en: 'Settled' },
+  sec_legs:      { es: 'Piernas:',       en: 'Legs:' },
+  sec_bankroll_curve: { es: 'CURVA DE BANKROLL', en: 'BANKROLL CURVE' },
+  // Outcomes
+  out_home:      { es: 'Victoria Local', en: 'Home Win' },
+  out_draw:      { es: 'Empate',         en: 'Draw' },
+  out_away:      { es: 'Victoria Visitante', en: 'Away Win' },
+  out_over25:    { es: 'Over 2.5',       en: 'Over 2.5' },
+  out_btts:      { es: 'Ambos Marcan',   en: 'BTTS' },
+  // Card buttons
+  card_home:     { es: '+ Local',        en: '+ Home' },
+  card_draw:     { es: '+ Empate',       en: '+ Draw' },
+  card_away:     { es: '+ Visitante',    en: '+ Away' },
+  // Empty states
+  empty_slip:    { es: 'Tu slip está vacío.\nAñade picks desde las predicciones del día.', en: 'Your slip is empty.\nAdd picks from the daily predictions.' },
+  empty_history: { es: 'No hay bets registrados todavía.', en: 'No bets recorded yet.' },
+  empty_parlay:  { es: 'Añade al menos 2 picks al slip para construir una combinada.', en: 'Add at least 2 picks to the slip to build a parlay.' },
+  // Ollama
+  ollama_add_first:  { es: '_t('ollama_add_first')', en: 'Add picks first.' },
+  ollama_querying:   { es: '_t('ollama_querying')', en: 'Querying Qwen3...' },
+  ollama_unavail:    { es: '_t('ollama_unavail')', en: 'Ollama unavailable at localhost:11434 — is it running?' },
+  // Stake / odds labels
+  lbl_odds:      { es: 'Cuota',          en: 'Odds' },
+  lbl_stake:     { es: 'Stake €',        en: 'Stake €' },
+  lbl_return:    { es: 'Retorno',        en: 'Return' },
+  lbl_exposure:  { es: 'Exposición',     en: 'Exposure' },
+  lbl_pot_ret:   { es: 'Retorno potencial', en: 'Potential return' },
+  lbl_comb_odds: { es: 'Cuota combinada',   en: 'Combined odds' },
+  lbl_comb_prob: { es: 'Prob. combinada',   en: 'Combined prob.' },
+  // Toast
+  toast_settled: { es: 'liquidado', en: 'settled' },
+  toast_won:     { es: 'ganado',    en: 'won' },
+  toast_lost:    { es: 'perdido',   en: 'lost' },
+  // Kelly
+  kelly_above:   { es: 'Stake', en: 'Stake' },
+  kelly_suffix:  { es: '× por encima del Kelly', en: '× above Kelly' },
+  kelly_ok:      { es: '✓ Dentro del Kelly', en: '✓ Within Kelly' },
+  // Misc
+  lbl_registered:{ es: 'Registrado:', en: 'Placed:' },
+  lbl_settled_at:{ es: 'Liquidado:',  en: 'Settled:' },
+  lbl_league:    { es: 'Liga',        en: 'League' },
+  lbl_bet:       { es: 'Apuesta',     en: 'Bet' },
+  lbl_result:    { es: 'Resultado',   en: 'Result' },
+  confirm_reset: { es: '¿_t('btn_reset') bankroll y borrar historial? No se puede deshacer.', en: 'Reset bankroll and clear all history? This cannot be undone.' },
+};
+function _t(key) { return (T[key] || {})[LANG] || (T[key] || {})['en'] || key; }
+
 // ── STATE ──
 function _loadState() {
   try {
@@ -1484,13 +1574,13 @@ function buildSidebar() {
   const brl   = loadBankroll();
   const slipBadge = nSlip > 0 ? nSlip : (brl ? '€'+brl.current.toFixed(0) : '—');
   const items = [
-    { id: 'SLIP',  icon: '🎯', label: 'Mi Bankroll',  badge: slipBadge,          cls: 'sb-active-track' },
-    { id: 'BETNOW',icon: '💰', label: 'Bet Now',      badge: nBetNow,            cls: 'sb-active-value' },
-    { id: 'BEST',  icon: '🏆', label: 'Top Picks',    badge: bestBets.length,    cls: 'sb-active-best'  },
-    { id: 'VALUE', icon: '💎', label: 'Value Bets',   badge: nVB,                cls: 'sb-active-value' },
-    { id: 'TRACK', icon: '📊', label: 'Rendimiento',  badge: nResolved,          cls: 'sb-active-track' },
-    { id: 'BACK',  icon: '📈', label: 'Backtest',     badge: bdAvail ? 'OK' : '—', cls: 'sb-active-back' },
-    { id: 'WIN',   icon: '🇪🇸', label: 'Winiela',     badge: nPD,                cls: 'sb-active-win'   },
+    { id: 'SLIP',  icon: '🎯', label: _t('nav_bankroll'), badge: slipBadge,          cls: 'sb-active-track' },
+    { id: 'BETNOW',icon: '💰', label: _t('nav_betnow'),   badge: nBetNow,            cls: 'sb-active-value' },
+    { id: 'BEST',  icon: '🏆', label: _t('nav_top'),      badge: bestBets.length,    cls: 'sb-active-best'  },
+    { id: 'VALUE', icon: '💎', label: _t('nav_value'),    badge: nVB,                cls: 'sb-active-value' },
+    { id: 'TRACK', icon: '📊', label: _t('nav_track'),    badge: nResolved,          cls: 'sb-active-track' },
+    { id: 'BACK',  icon: '📈', label: _t('nav_back'),     badge: bdAvail ? 'OK' : '—', cls: 'sb-active-back' },
+    { id: 'WIN',   icon: '🇪🇸', label: _t('nav_win'),     badge: nPD,                cls: 'sb-active-win'   },
   ];
 
   nav.innerHTML = items.map(item => {
@@ -2064,7 +2154,7 @@ function renderWinielaView() {
           <div style="margin-left:auto">
             <button id="winiela-slip-btn"
               style="background:var(--accent-teal);border:none;border-radius:7px;padding:7px 16px;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:#000;cursor:pointer">
-              🎯 Añadir al bankroll
+              _t('btn_add_bkrl')
             </button>
           </div>
           <div class="parlay-disclaimer">¡Solo por diversión! · Apuesta con responsabilidad</div>
@@ -2157,7 +2247,7 @@ function renderBestBetsView(bets) {
             <div style="margin-left:auto">
               <button data-parlay-idx="${_parlayCache.length - 1}" onclick="loadParlayToSlip(_parlayCache[+this.dataset.parlayIdx])"
                 style="background:var(--accent-teal);border:none;border-radius:7px;padding:7px 16px;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:#000;cursor:pointer">
-                🎯 Añadir al bankroll
+                _t('btn_add_bkrl')
               </button>
             </div>
             <div class="parlay-disclaimer">Solo informativo · Apuesta con responsabilidad</div>
@@ -2599,7 +2689,7 @@ function renderTrackingView() {
     return true;
   });
 
-  const outLabels = { home: 'Local', draw: 'Empate', away: 'Visitante' };
+  const outLabels = { home: _t('out_home'), draw: _t('out_draw'), away: _t('out_away') };
 
   const rows = filtered.map(p => {
     const isResolved = p.actualResult !== null;
@@ -3206,7 +3296,7 @@ function confirmBankroll() {
 }
 
 function resetBankroll() {
-  if (!confirm('¿Resetear bankroll y borrar historial? No se puede deshacer.')) return;
+  if (!confirm('¿_t('btn_reset') bankroll y borrar historial? No se puede deshacer.')) return;
   localStorage.removeItem(_BRL_KEY);
   localStorage.removeItem(_HIST_KEY);
   saveSlip([]);
@@ -3214,7 +3304,8 @@ function resetBankroll() {
 }
 
 function _outcomeLabel(o) {
-  return {home:'Local',draw:'Empate',away:'Visitante',over25:'Over 2.5',btts:'BTTS'}[o] || o;
+  return { home: _t('out_home'), draw: _t('out_draw'), away: _t('out_away'),
+           over25: _t('out_over25'), btts: _t('out_btts') }[o] || o;
 }
 function _outcomeColor(o) {
   return {home:'var(--home)',draw:'var(--draw)',away:'var(--away)',over25:'var(--accent-teal)',btts:'var(--accent-gold)'}[o] || 'var(--muted)';
@@ -3368,9 +3459,9 @@ async function analyzeRiskWithOllama() {
     return;
   }
 
-  btn.disabled = true; btn.textContent = '⏳ Analizando...';
+  btn.disabled = true; btn.textContent = '_t('btn_analyzing')';
   box.style.display = 'block';
-  box.innerHTML = '<span style="color:var(--muted)">Consultando Qwen3...</span>';
+  box.innerHTML = '<span style="color:var(--muted)">_t('ollama_querying')</span>';
 
   // Build context depending on whether we're in combinada tab or activo tab
   const isCombinada = _slipTab === 'combined';
@@ -3416,9 +3507,9 @@ CONSEJO: (1-2 frases concretas)`;
     const txt = (d.message?.content || 'Sin respuesta').replace(/\n/g, '<br>');
     box.innerHTML = `<div style="line-height:1.7">${txt}</div>`;
   } catch(e) {
-    box.innerHTML = '<span style="color:var(--accent-orange)">Ollama no disponible en localhost:11434 — ¿está corriendo?</span>';
+    box.innerHTML = '<span style="color:var(--accent-orange)">_t('ollama_unavail')</span>';
   } finally {
-    btn.disabled = false; btn.textContent = '🤖 Analizar riesgo';
+    btn.disabled = false; btn.textContent = '_t('btn_ollama')';
   }
 }
 
@@ -3456,7 +3547,7 @@ function renderSlipView() {
       <span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:var(--accent-yellow)">€${inPlay.toFixed(2)}</span>
     </div>
     <div style="margin-left:auto;display:flex;gap:8px">
-      <button onclick="resetBankroll()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 12px;color:var(--muted);cursor:pointer;font-size:12px">Resetear</button>
+      <button onclick="resetBankroll()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 12px;color:var(--muted);cursor:pointer;font-size:12px">_t('btn_reset')</button>
       ${!brl ? `<button onclick="document.getElementById('bankroll-modal').style.display='flex'" style="background:var(--accent-green);border:none;border-radius:6px;padding:6px 14px;color:#000;cursor:pointer;font-size:12px;font-weight:700">Configurar bankroll</button>` : ''}
     </div>
   </div>`;
@@ -3468,10 +3559,10 @@ function renderSlipView() {
       Slip activo ${slip.length ? `<span style="background:var(--accent-teal);color:#000;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:4px">${slip.length}</span>` : ''}
     </div>
     <div class="slip-tab ${_slipTab==='history'?'active':''}" onclick="_slipTab='history';renderSlipView()">
-      Historial ${hist.length ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:10px;margin-left:4px">${hist.length}</span>` : ''}
+      ${_t('tab_history')} ${hist.length ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:10px;margin-left:4px">${hist.length}</span>` : ''}
     </div>
     <div class="slip-tab ${_slipTab==='combined'?'active':''}" onclick="_slipTab='combined';renderSlipView()">
-      Combinada ${slip.length>=2?`<span style="background:var(--accent-gold);color:#000;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:4px">${slip.length}</span>`:''}
+      ${_t('tab_combined')} ${slip.length>=2?`<span style="background:var(--accent-gold);color:#000;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:4px">${slip.length}</span>`:''}
     </div>
   </div>`;
 
@@ -3483,7 +3574,7 @@ function renderSlipView() {
       body = `<div class="slip-body" style="text-align:center;padding:60px 24px">
         <div style="font-size:36px;margin-bottom:12px">🎯</div>
         <div style="color:var(--muted);font-size:14px">Tu slip está vacío.<br>Añade picks desde las predicciones del día.</div>
-        <button onclick="activeDate=DATES[0]||'ALL';render()" style="margin-top:20px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 22px;color:var(--text);cursor:pointer;font-size:14px">Ver predicciones</button>
+        <button onclick="activeDate=DATES[0]||'ALL';render()" style="margin-top:20px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 22px;color:var(--text);cursor:pointer;font-size:14px">_t('btn_view_pred')</button>
       </div>`;
     } else {
       const total  = slip.reduce((s,b) => s+parseFloat(b.stake||0), 0);
@@ -3543,9 +3634,9 @@ function renderSlipView() {
         <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
           <button id="ollama-risk-btn" onclick="analyzeRiskWithOllama()"
             style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 18px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">
-            🤖 Analizar riesgo
+            _t('btn_ollama')
           </button>
-          <button class="slip-cta" onclick="placeBets()" ${!brl?'disabled':''}>✅ Registrar bets</button>
+          <button class="slip-cta" onclick="placeBets()" ${!brl?'disabled':''}>_t('btn_place')</button>
         </div>
       </div>
       <div id="ollama-risk-box" class="ollama-box" style="display:${document.getElementById('ollama-risk-box')?.innerHTML?'block':'none'};margin:0 24px 16px"></div>`;
@@ -3571,7 +3662,7 @@ function renderSlipView() {
       const range  = maxBrl - minBrl || 1;
       const sparkline = curve.length > 1 ? `
         <div style="margin:0 24px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 16px">
-          <div style="color:var(--muted);font-size:11px;margin-bottom:8px">CURVA DE BANKROLL</div>
+          <div style="color:var(--muted);font-size:11px;margin-bottom:8px">_t('sec_bankroll_curve')</div>
           <div style="display:flex;align-items:flex-end;gap:3px;height:40px">
             ${curve.map(v => {
               const h = Math.max(4, Math.round(((v-minBrl)/range)*36));
@@ -3584,9 +3675,9 @@ function renderSlipView() {
       const histRows = [...hist].sort((a,b) => (b.placedAt||'') > (a.placedAt||'') ? 1 : -1).map((b, idx) => {
         const badge = b.settled
           ? (b.result === 'won'
-            ? `<span class="hist-badge-won">GANADO +€${b.pnl.toFixed(2)}</span>`
-            : `<span class="hist-badge-lost">PERDIDO -€${Math.abs(b.pnl).toFixed(2)}</span>`)
-          : `<span class="hist-badge-pending">PENDIENTE</span>`;
+            ? `<span class="hist-badge-won">${_t('badge_won')} +€${b.pnl.toFixed(2)}</span>`
+            : `<span class="hist-badge-lost">${_t('badge_lost')} -€${Math.abs(b.pnl).toFixed(2)}</span>`)
+          : `<span class="hist-badge-pending">${_t('badge_pending')}</span>`;
 
         const title = b.type === 'combinada'
           ? `🔗 Combinada ${b.legs?.length} piernas @${b.combinedOdds}`
@@ -3680,12 +3771,12 @@ function renderSlipView() {
       const statsBar = settled.length ? `
         <div style="display:flex;flex-wrap:wrap;gap:10px;padding:14px 24px;background:var(--surface2);border-bottom:1px solid var(--border)">
           ${[
-            ['Win rate',   `${winRate}%`,    winRate !== '—' && +winRate >= 50 ? 'var(--accent-green)' : 'var(--accent-orange)'],
-            ['ROI real',   `${roi >= 0 ? '+' : ''}${roi}%`, roiColor],
+            [_t('stat_winrate'),   `${winRate}%`,    winRate !== '—' && +winRate >= 50 ? 'var(--accent-green)' : 'var(--accent-orange)'],
+            [_t('stat_roi'),   `${roi >= 0 ? '+' : ''}${roi}%`, roiColor],
             ['P&L',        `${totalPnl>=0?'+':''}€${totalPnl.toFixed(2)}`, pnlColor],
-            ['Cuota media',`@${avgOdds}`,    'var(--accent-gold)'],
-            ['Racha',      streakStr,         streakType === 'won' ? 'var(--accent-green)' : 'var(--accent-orange)'],
-            ['Resueltos',  `${settled.length}/${hist.length}`, 'var(--text)'],
+            [_t('stat_avgodds'),`@${avgOdds}`,    'var(--accent-gold)'],
+            [_t('stat_streak'),      streakStr,         streakType === 'won' ? 'var(--accent-green)' : 'var(--accent-orange)'],
+            [_t('stat_settled'),  `${settled.length}/${hist.length}`, 'var(--text)'],
           ].map(([label, val, col]) => `
             <div style="text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 14px;min-width:80px">
               <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">${label}</div>
@@ -3733,7 +3824,7 @@ function renderSlipView() {
                   <div style="font-size:11px;color:var(--muted);margin-top:2px">${(b.placedAt||'').slice(0,10)} · Stake €${b.stake}</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px">
-                  <span class="hist-badge-pending">PENDIENTE</span>
+                  <span class="hist-badge-pending">${_t('badge_pending')}</span>
                   <span style="color:var(--muted);font-size:14px">▾</span>
                 </div>
               </div>
@@ -3749,8 +3840,8 @@ function renderSlipView() {
       const settledRows = [...settled].sort((a,b2) => (b2.settledAt||b2.placedAt||'') > (a.settledAt||a.placedAt||'') ? 1:-1)
         .map((b, idx) => {
           const badge = b.result === 'won'
-            ? `<span class="hist-badge-won">GANADO +€${b.pnl.toFixed(2)}</span>`
-            : `<span class="hist-badge-lost">PERDIDO -€${Math.abs(b.pnl).toFixed(2)}</span>`;
+            ? `<span class="hist-badge-won">${_t('badge_won')} +€${b.pnl.toFixed(2)}</span>`
+            : `<span class="hist-badge-lost">${_t('badge_lost')} -€${Math.abs(b.pnl).toFixed(2)}</span>`;
           const title = b.type === 'combinada'
             ? `🔗 Combinada ${b.legs?.length} piernas @${b.combinedOdds}`
             : `${b.homeName} vs ${b.awayName}`;
@@ -3840,9 +3931,9 @@ function renderSlipView() {
           <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
             <button id="ollama-risk-btn" onclick="analyzeRiskWithOllama()"
               style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 18px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">
-              🤖 Analizar riesgo
+              _t('btn_ollama')
             </button>
-            <button class="slip-cta" onclick="placeCombinada()" ${!brl?'disabled':''}>✅ Registrar combinada</button>
+            <button class="slip-cta" onclick="placeCombinada()" ${!brl?'disabled':''}>_t('btn_place_comb')</button>
           </div>
         </div>
         <div id="ollama-risk-box" class="ollama-box" style="display:none;margin:12px 0 0"></div>
@@ -3883,6 +3974,14 @@ function loadParlayToSlip(legs) {
 
 // ── On page load: init bankroll + settle pending bets ──
 function initBankrollSystem() {
+  // Apply i18n to static modal HTML
+  const mTitle = document.getElementById('brl-modal-title');
+  const mSub   = document.getElementById('brl-modal-sub');
+  if (mTitle) mTitle.textContent = _t('modal_title');
+  if (mSub)   mSub.textContent   = _t('modal_sub');
+  const mBtn = document.querySelector('#bankroll-modal button');
+  if (mBtn) mBtn.textContent = _t('btn_start');
+
   const brl = loadBankroll();
   if (!brl) {
     document.getElementById('bankroll-modal').style.display = 'flex';
