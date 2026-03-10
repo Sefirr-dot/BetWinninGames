@@ -168,7 +168,11 @@ def _best_odds(event: dict) -> dict | None:
     return result
 
 
-def fetch_window(dates: list[str], league_code: str | None = None) -> list[str]:
+def fetch_window(
+    dates: list[str],
+    league_code: str | None = None,
+    force: bool = False,
+) -> list[str]:
     """
     Download odds for every date in `dates` (YYYY-MM-DD strings).
 
@@ -179,6 +183,7 @@ def fetch_window(dates: list[str], league_code: str | None = None) -> list[str]:
     ----------
     dates       : list of date strings, e.g. ["2026-03-06", "2026-03-07", ...]
     league_code : if set, only fetch that league (saves even more quota)
+    force       : bypass TTL cache and always fetch (use for near-closing snapshot)
 
     Returns
     -------
@@ -188,7 +193,7 @@ def fetch_window(dates: list[str], league_code: str | None = None) -> list[str]:
         print("    [odds_fetcher] ODDS_API_KEY no configurado — omitiendo cuotas.")
         return []
 
-    if _all_csvs_fresh(dates):
+    if not force and _all_csvs_fresh(dates):
         print(f"    [odds] CSVs recientes encontrados (<{CACHE_TTL_HOURS}h), omitiendo llamadas API.")
         return []
 
@@ -251,3 +256,156 @@ def fetch_window(dates: list[str], league_code: str | None = None) -> list[str]:
         save_odds_history(by_date)
 
     return written
+
+
+# ---------------------------------------------------------------------------
+# Pinnacle sharp-line snapshot
+# ---------------------------------------------------------------------------
+
+_PINNACLE_DIR = "cache/pinnacle"
+
+
+def fetch_pinnacle_snapshots(
+    dates: list[str],
+    league_code: str | None = None,
+) -> list[str]:
+    """
+    Fetch Pinnacle-specific odds for each league (1 API call per league).
+
+    Pinnacle is the sharpest bookmaker and its line is the standard closing-line
+    reference used by professional bettors for CLV calculation.
+
+    CSVs written to cache/pinnacle/YYYY-MM-DD.csv with columns:
+        home_team, away_team, pin_1, pin_x, pin_2
+
+    Returns list of CSV paths written.  Silently skips on API errors.
+    """
+    if not ODDS_API_KEY:
+        return []
+
+    leagues = (
+        {league_code: _SPORT_KEYS[league_code]}
+        if league_code and league_code in _SPORT_KEYS
+        else _SPORT_KEYS
+    )
+
+    date_set = set(dates)
+    by_date: dict[str, list[dict]] = {d: [] for d in dates}
+
+    for code, sport_key in leagues.items():
+        try:
+            url = f"{_BASE}/sports/{sport_key}/odds/"
+            params = {
+                "apiKey":      ODDS_API_KEY,
+                "bookmakers":  "pinnacle",   # Pinnacle only — replaces regions
+                "markets":     "h2h",
+                "dateFormat":  "iso",
+                "oddsFormat":  "decimal",
+            }
+            resp = requests.get(url, params=params, timeout=15)
+            resp.raise_for_status()
+            events = resp.json()
+            remaining = resp.headers.get("x-requests-remaining", "?")
+            matched = 0
+            for ev in events:
+                ev_date = ev.get("commence_time", "")[:10]
+                if ev_date not in date_set:
+                    continue
+                home = ev["home_team"]
+                away = ev["away_team"]
+                best = {"p1": 0.0, "px": 0.0, "p2": 0.0}
+                for bk in ev.get("bookmakers", []):
+                    for mkt in bk.get("markets", []):
+                        if mkt["key"] == "h2h":
+                            by_name = {o["name"]: o["price"] for o in mkt["outcomes"]}
+                            best["p1"] = max(best["p1"], by_name.get(home, 0.0))
+                            best["px"] = max(best["px"], by_name.get("Draw", 0.0))
+                            best["p2"] = max(best["p2"], by_name.get(away, 0.0))
+                if min(best["p1"], best["px"], best["p2"]) <= 1.0:
+                    continue
+                by_date[ev_date].append({
+                    "home_team": home,
+                    "away_team": away,
+                    "pin_1": round(best["p1"], 2),
+                    "pin_x": round(best["px"], 2),
+                    "pin_2": round(best["p2"], 2),
+                })
+                matched += 1
+            print(f"    [Pinnacle/{code}] {matched} partidos  (quota: {remaining})")
+        except Exception as e:
+            print(f"    [Pinnacle/{code}] Error: {e}")
+
+    os.makedirs(_PINNACLE_DIR, exist_ok=True)
+    written = []
+    for date_str in sorted(by_date):
+        rows = by_date[date_str]
+        if not rows:
+            continue
+        path = os.path.join(_PINNACLE_DIR, f"{date_str}.csv")
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["home_team", "away_team", "pin_1", "pin_x", "pin_2"])
+            writer.writeheader()
+            writer.writerows(rows)
+        written.append(path)
+
+    return written
+
+
+def get_pinnacle_implied(home: str, away: str, match_date: str) -> dict | None:
+    """
+    Return Pinnacle margin-removed implied probabilities for a match.
+
+    Uses the same three-tier name matching as value_detector._match_odds().
+
+    Returns
+    -------
+    dict with keys "home", "draw", "away" (margin-removed floats) or None.
+    """
+    path = os.path.join(_PINNACLE_DIR, f"{match_date}.csv")
+    if not os.path.exists(path):
+        return None
+
+    try:
+        import unicodedata
+        import re
+
+        def _norm(n: str) -> str:
+            n = n.lower().strip().replace("-", " ")
+            n = unicodedata.normalize("NFKD", n).encode("ascii", "ignore").decode("ascii")
+            n = re.sub(r"[^a-z0-9 ]", "", n)
+            return re.sub(r"\s+", " ", n).strip()
+
+        norm_h = _norm(home)
+        norm_a = _norm(away)
+        pin_map: dict[tuple, dict] = {}
+
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                try:
+                    key = (_norm(row["home_team"]), _norm(row["away_team"]))
+                    pin_map[key] = {
+                        "p1": float(row["pin_1"]),
+                        "px": float(row["pin_x"]),
+                        "p2": float(row["pin_2"]),
+                    }
+                except (KeyError, ValueError):
+                    continue
+
+        # exact → substring → skip
+        entry = pin_map.get((norm_h, norm_a))
+        if entry is None:
+            for (hk, ak), v in pin_map.items():
+                if (norm_h in hk or hk in norm_h) and (norm_a in ak or ak in norm_a):
+                    entry = v
+                    break
+        if entry is None:
+            return None
+
+        r1, rx, r2 = 1 / entry["p1"], 1 / entry["px"], 1 / entry["p2"]
+        s = r1 + rx + r2
+        if s <= 0:
+            return None
+        return {"home": r1 / s, "draw": rx / s, "away": r2 / s}
+
+    except Exception:
+        return None

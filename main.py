@@ -254,7 +254,19 @@ def main():
     # --- Fetch bookmaker odds for the full window (1 API call per league) ---
     print("  [3/4] Descargando cuotas (The Odds API)...")
     date_strs = [d.strftime("%Y-%m-%d") for d in target_dates]
-    odds_fetcher.fetch_window(date_strs, args.league)
+
+    # Near-closing snapshot: if today is a target date and it's afternoon (>=12 UTC),
+    # force-refresh to capture line movement before kickoff (costs same quota as normal fetch)
+    _now_utc = datetime.now(timezone.utc)
+    _today_str = _now_utc.strftime("%Y-%m-%d")
+    _near_closing = _today_str in date_strs and _now_utc.hour >= 12
+    if _near_closing:
+        print("    [odds] Tarde del día de partido — actualizando cuotas de cierre...")
+    odds_fetcher.fetch_window(date_strs, args.league, force=_near_closing)
+
+    # Pinnacle sharp-line snapshot (1 extra call per league, ~4 calls total)
+    print("  [3b/4] Descargando cuotas Pinnacle (referencia de cierre)...")
+    odds_fetcher.fetch_pinnacle_snapshots(date_strs, args.league)
 
     # --- Generate predictions per day, collect into one JS ---
     print("  [4/4] Generando predicciones...")

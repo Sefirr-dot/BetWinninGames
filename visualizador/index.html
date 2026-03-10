@@ -2729,8 +2729,9 @@ function renderValueBetsView() {
           <div class="vb-prob-row">
             <span><div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Modelo</div><div class="vb-prob-val" style="color:var(--accent-green)">${vb.modelProb}%</div></span>
             <span><div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Implícita</div><div class="vb-prob-val">${vb.impliedProb}%</div></span>
-            <span><div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Cuota Justa</div><div class="vb-prob-val" style="color:var(--accent-gold)">${m.fairOdds ? '@'+m.fairOdds : '—'}</div></span>
+            ${vb.pinnacleProb ? `<span><div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Pinnacle</div><div class="vb-prob-val" style="color:var(--accent-teal)">${vb.pinnacleProb}%</div></span>` : `<span><div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Cuota Justa</div><div class="vb-prob-val" style="color:var(--accent-gold)">${m.fairOdds ? '@'+m.fairOdds : '—'}</div></span>`}
           </div>
+          ${vb.clvVsPinnacle !== null && vb.clvVsPinnacle !== undefined ? `<div style="margin-top:4px;font-size:11px;color:${vb.clvVsPinnacle >= 0 ? 'var(--accent-teal)' : 'var(--accent-orange)'}">CLV vs Pinnacle ${vb.clvVsPinnacle >= 0 ? '+' : ''}${vb.clvVsPinnacle}%</div>` : ''}
         </div>
         <div class="vb-card-right">
           <div class="vb-odds-val">@${vb.bkOdds}</div>
@@ -2946,8 +2947,9 @@ function renderMatchModal(m) {
         </div>
         <div style="text-align:right">
           <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:20px;font-weight:800">@${vb.bkOdds}</div>
-          <div style="font-size:10px;color:var(--muted)">Modelo ${vb.modelProb}% vs Impl. ${vb.impliedProb}%</div>
+          <div style="font-size:10px;color:var(--muted)">Modelo ${vb.modelProb}% vs Impl. ${vb.impliedProb}%${vb.pinnacleProb ? ` vs Pin. ${vb.pinnacleProb}%` : ''}</div>
           ${vb.oddsMovement ? `<div style="font-size:10px;color:var(--accent-yellow)">Cuota acortó ×${vb.oddsMovement}</div>` : ''}
+          ${vb.clvVsPinnacle !== null && vb.clvVsPinnacle !== undefined ? `<div style="font-size:10px;color:${vb.clvVsPinnacle >= 0 ? 'var(--accent-teal)' : 'var(--accent-orange)'}">CLV vs Pinnacle ${vb.clvVsPinnacle >= 0 ? '+' : ''}${vb.clvVsPinnacle}%</div>` : ''}
         </div>
       </div>`
     ).join('');

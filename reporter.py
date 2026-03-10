@@ -417,8 +417,10 @@ def _prediction_to_dict(entry: dict, date_str: str, match_vbs: list[dict], stand
             "kelly":       round(vb["kelly_fraction"] * 100, 1),
             "modelProb":   round(vb["model_prob"] * 100, 1),
             "impliedProb": round(vb["implied_prob"] * 100, 1),
-            "sharpMoney":  bool(vb.get("sharp_money", False)),
-            "oddsMovement": round(vb["odds_movement"], 3) if vb.get("odds_movement") else None,
+            "sharpMoney":     bool(vb.get("sharp_money", False)),
+            "oddsMovement":   round(vb["odds_movement"], 3) if vb.get("odds_movement") else None,
+            "pinnacleProb":   round(vb["pinnacle_prob"] * 100, 1) if vb.get("pinnacle_prob") else None,
+            "clvVsPinnacle":  round(vb["clv_vs_pinnacle"] * 100, 1) if vb.get("clv_vs_pinnacle") is not None else None,
         }
         for vb in match_vbs
     ] or None

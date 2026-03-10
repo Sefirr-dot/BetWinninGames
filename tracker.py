@@ -564,11 +564,19 @@ def run_tracker(quiet: bool = False, no_update: bool = False, no_report: bool = 
         metrics["n_pending"] = len(pending)
         metrics["n_total"]   = len(all_picks)
 
-    # 3. Maybe update calibrator, optimise weights, train meta-learner
+    # 3. Maybe update calibrator, optimise weights, train meta-learner, draw model
     if resolved:
         maybe_fit_calibrator(resolved)
         maybe_optimize_weights(resolved)
         maybe_train_meta_learner(resolved)
+        try:
+            from algorithms.draw_model import train as _train_draw
+            _draw_result = _train_draw(PICKS_DB)
+            if not quiet:
+                print(f"  [tracker] {_draw_result}")
+        except Exception as _e:
+            if not quiet:
+                print(f"  [tracker] draw_model: {_e}")
 
     # 4. Save metrics snapshot for downstream consumers (e.g. dynamic Kelly)
     if metrics:

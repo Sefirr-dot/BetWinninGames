@@ -19,12 +19,14 @@ import match_context as _match_context
 from algorithms import calibrator as _calibrator
 from algorithms import weight_optimizer as _wopt
 from algorithms import meta_learner as _meta_learner
+from algorithms import draw_model as _draw_model
 
 # Load once at import time; falls back to config defaults when file absent
 _calib_params    = _calibrator.load_calibrator()
 _dynamic_weights = _wopt.load_weights()
 _eff_weights     = {**MODEL_WEIGHTS, **_dynamic_weights} if _dynamic_weights else MODEL_WEIGHTS
 _ml_model        = _meta_learner.load_model()
+_draw_weights    = _draw_model.load_model()
 
 
 def _blend_1x2(
@@ -298,34 +300,56 @@ def predict_match(
     lam = round(lam * motiv["home_mult"], 4)
     mu  = round(mu  * motiv["away_mult"], 4)
 
-    # --- Draw adjustment: nudge draw prob toward league historical rate ---
-    # Enhanced draw detector: composite score amplifies nudge when multiple signals align.
-    elo_diff = abs(elo_pred.get("rating_home", 1500) - elo_pred.get("rating_away", 1500))
-    proximity = max(0.0, 1.0 - elo_diff / 500.0)
-    league_draw_rate = DRAW_RATE_BY_LEAGUE.get(league_code or "", 0.25)
+    # --- Draw adjustment ---
+    # When draw_model is trained: replace hand-tuned nudge with learned probabilities.
+    # Otherwise fall back to the composite signal nudge (legacy behaviour).
+    _dc_draw  = dc_pred.get("prob_draw", 1/3) if dc_pred else 1/3
+    _elo_draw = elo_pred.get("prob_draw", 1/3) if elo_pred else 1/3
+    _h2h_draw = (h2h_pred.get("prob_draw", 0.0)
+                 if h2h_pred.get("sufficient") else 0.0)
 
-    draw_signals = 0
-    if elo_diff < 100:                                            # closely-matched teams
-        draw_signals += 1
-    if (lam + mu) < 2.5:                                         # low-scoring expected game
-        draw_signals += 1
-    if h2h_pred.get("sufficient") and h2h_pred.get("prob_draw", 0) > 0.35:  # H2H draw-heavy
-        draw_signals += 1
-    _h_ppg = (form_pred or {}).get("home_form", {}).get("points_per_game", 1.5)
-    _a_ppg = (form_pred or {}).get("away_form", {}).get("points_per_game", 1.5)
-    if 0.8 <= _h_ppg <= 2.0 and 0.8 <= _a_ppg <= 2.0:          # both teams mediocre form
-        draw_signals += 1
-    nudge_strength = 0.25 + 0.15 * draw_signals / 4.0           # 0.25..0.40
+    if _draw_weights is not None:
+        # Learned model: use calibrated sigmoid draw probability
+        pd_model = _draw_model.predict(
+            _dc_draw, _elo_draw, _h2h_draw, _mkt_px, _draw_weights
+        )
+        pd_old = pd
+        pd = pd_model
+        actual_adj = pd - pd_old
+        if abs(actual_adj) > 1e-9:
+            denom = ph + pa + 1e-9
+            ph = max(0.0, ph - actual_adj * ph / denom)
+            pa = max(0.0, pa - actual_adj * pa / denom)
+            _t = ph + pd + pa
+            ph, pd, pa = ph / _t, pd / _t, pa / _t
+    else:
+        # Legacy: hand-tuned nudge toward league historical draw rate
+        elo_diff = abs(elo_pred.get("rating_home", 1500) - elo_pred.get("rating_away", 1500))
+        proximity = max(0.0, 1.0 - elo_diff / 500.0)
+        league_draw_rate = DRAW_RATE_BY_LEAGUE.get(league_code or "", 0.25)
 
-    pd_old = pd
-    pd = max(0.05, min(0.45, pd + proximity * (league_draw_rate - pd) * nudge_strength))
-    actual_adj = pd - pd_old
-    if abs(actual_adj) > 1e-9:
-        denom = ph + pa + 1e-9
-        ph = max(0.0, ph - actual_adj * ph / denom)
-        pa = max(0.0, pa - actual_adj * pa / denom)
-        _t = ph + pd + pa
-        ph, pd, pa = ph / _t, pd / _t, pa / _t
+        draw_signals = 0
+        if elo_diff < 100:
+            draw_signals += 1
+        if (lam + mu) < 2.5:
+            draw_signals += 1
+        if h2h_pred.get("sufficient") and h2h_pred.get("prob_draw", 0) > 0.35:
+            draw_signals += 1
+        _h_ppg = (form_pred or {}).get("home_form", {}).get("points_per_game", 1.5)
+        _a_ppg = (form_pred or {}).get("away_form", {}).get("points_per_game", 1.5)
+        if 0.8 <= _h_ppg <= 2.0 and 0.8 <= _a_ppg <= 2.0:
+            draw_signals += 1
+        nudge_strength = 0.25 + 0.15 * draw_signals / 4.0
+
+        pd_old = pd
+        pd = max(0.05, min(0.45, pd + proximity * (league_draw_rate - pd) * nudge_strength))
+        actual_adj = pd - pd_old
+        if abs(actual_adj) > 1e-9:
+            denom = ph + pa + 1e-9
+            ph = max(0.0, ph - actual_adj * ph / denom)
+            pa = max(0.0, pa - actual_adj * pa / denom)
+            _t = ph + pd + pa
+            ph, pd, pa = ph / _t, pd / _t, pa / _t
 
     # --- Position adjustment: table rank as tiebreaker ---
     if home_pos and away_pos:

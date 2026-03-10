@@ -276,10 +276,12 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
         # Odds movement signal (sharp money)
         match_date = mi.get("utcDate", "")[:10]
         try:
-            from odds_fetcher import get_odds_movement
+            from odds_fetcher import get_odds_movement, get_pinnacle_implied
             movement = get_odds_movement(home_name, away_name, match_date)
+            pinnacle_implied = get_pinnacle_implied(home_name, away_name, match_date)
         except Exception:
             movement = None
+            pinnacle_implied = None
 
         checks = [
             ("home",  pred.get("prob_home", 0.0), odds["odds_1"]),
@@ -309,19 +311,28 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
 
             if effective_edge >= effective_threshold:
                 kelly = _kelly_fraction(effective_edge, bk_odds, stars, league)
+
+                # CLV vs Pinnacle: positive = we predicted better than sharp closing line
+                _pin_key = {"home": "home", "draw": "draw", "away": "away"}.get(outcome)
+                pin_prob = (pinnacle_implied.get(_pin_key)
+                            if pinnacle_implied and _pin_key else None)
+                clv_vs_pinnacle = round(model_prob - pin_prob, 4) if pin_prob else None
+
                 value_bets.append({
-                    "match":          f"{home_name} vs {away_name}",
-                    "league":         mi.get("_league_code", ""),
-                    "outcome":        outcome,
-                    "model_prob":     model_prob,
-                    "implied_prob":   implied_prob,
-                    "edge":           effective_edge,
-                    "bk_odds":        bk_odds,
-                    "kelly_fraction": kelly,
-                    "home_name":      home_name,
-                    "away_name":      away_name,
-                    "odds_movement":  mv_ratio if movement and _outcome_mv_key else None,
-                    "sharp_money":    sharp_money,
+                    "match":           f"{home_name} vs {away_name}",
+                    "league":          mi.get("_league_code", ""),
+                    "outcome":         outcome,
+                    "model_prob":      model_prob,
+                    "implied_prob":    implied_prob,
+                    "edge":            effective_edge,
+                    "bk_odds":         bk_odds,
+                    "kelly_fraction":  kelly,
+                    "home_name":       home_name,
+                    "away_name":       away_name,
+                    "odds_movement":   mv_ratio if movement and _outcome_mv_key else None,
+                    "sharp_money":     sharp_money,
+                    "pinnacle_prob":   pin_prob,
+                    "clv_vs_pinnacle": clv_vs_pinnacle,
                 })
 
     return sorted(value_bets, key=lambda x: x["edge"], reverse=True)

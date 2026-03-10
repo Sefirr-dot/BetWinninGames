@@ -30,6 +30,12 @@ python tracker.py --no-update
 
 # Re-train meta_learner manually (only on real live picks, never on seeds)
 python -c "from algorithms.meta_learner import train; print(train('cache/picks_history.db'))"
+
+# Pre-train draw model from backtest results (runs automatically at end of backtest)
+python backtest.py --league ALL --seasons 2023 2024   # → also writes cache/draw_model.json
+
+# Re-train draw model manually on live picks (>= 50 resolved required)
+python -c "from algorithms.draw_model import train; print(train('cache/picks_history.db'))"
 ```
 
 After running, open `visualizador/index.html` directly in a browser (no server needed).
@@ -57,7 +63,7 @@ All keys live in `config.py` (gitignored — copy from `config.example.py`):
 2. **Augment** — `fdco_fetcher.augment_historical()` appends seasons 2020–2022 from football-data.co.uk CSVs. Also parses referee names (`_referee`), corner counts (`_hc`/`_ac`/`_total_corners`) and yellow cards (`_home_yellow`/`_away_yellow`).
 3. **Enrich with xG** — `understat_fetcher.enrich_with_xg()` adds `_xg_home`/`_xg_away`. Cached in `cache/understat_xg.db`.
 4. **Fit models** — `dixon_coles.fit_per_league()` + `elo.build_ratings()` + `elo.build_split_ratings()`.
-5. **Fetch odds** — `odds_fetcher.fetch_window()` writes `odds/YYYY-MM-DD.csv` and saves snapshots to `cache/odds_history.db` for movement tracking.
+5. **Fetch odds** — `odds_fetcher.fetch_window()` writes `odds/YYYY-MM-DD.csv` and saves snapshots to `cache/odds_history.db` for movement tracking. Auto force-refreshes (near-closing snapshot) when run after 12:00 UTC on a match day. `odds_fetcher.fetch_pinnacle_snapshots()` also fetches Pinnacle-specific odds to `cache/pinnacle/YYYY-MM-DD.csv` as sharp-line CLV reference.
 6. **Predict** — `ensemble.predict_match()` per match → `rank_predictions()`. Lineup check fires automatically when kickoff < 3h.
 7. **AI Advisor** — `ai_advisor.enrich_predictions()` calls Ollama with Google News headlines. `think:False` required for Qwen3 models.
 8. **Report** — `value_detector.find_edges()` → `reporter.generate_js()` → `db_picks.save_picks()` → `tracker.run_tracker()`.
@@ -79,6 +85,7 @@ All keys live in `config.py` (gitignored — copy from `config.example.py`):
 | `fatigue` | n/a | Multiplicative penalty on λ/μ. ≥7 days → 1.0; ≤1 day → 0.82. |
 | `cards` | n/a | Display-only linear proxy. |
 | `meta_learner` | override | XGBoost. **Only trains on `source='live'` picks** (never on backtest seeds). Activated when `cache/meta_learner.pkl` exists. Skips Platt calibration when active. |
+| `draw_model` | n/a | Logistic regression (scipy) draw classifier. Features: `dc_draw`, `elo_draw`, `h2h_draw`, `mkt_draw`. **Replaces** the hand-tuned draw nudge in ensemble when `cache/draw_model.json` exists. Pre-trains from backtest automatically; fine-tunes on live picks (≥50) via tracker. `source` field in JSON distinguishes `backtest_pretrain` vs `live` — live model is never overwritten by backtest. |
 | `match_context` | n/a | `classify(elo_pred, form_pred, h2h_pred, home_pos, away_pos)` → tags list. Tags: `even_match`, `top6_clash`, `relegation_6ptr`, `home_in_form`, `away_in_form`, `h2h_dominant`. Combined with `motivation` tags in `_tags`. |
 
 ### Calibrator and weight optimizer (auto-loading)
@@ -157,7 +164,7 @@ Beyond the original fields, each match object now includes:
 - `over15`, `over35`, `over45` — from Monte Carlo simulation (%)
 - `bttsAndOver25` — combined BTTS+Over 2.5 probability (%)
 - `ahHomeMinus1Win`, `ahHomeMinus1Push`, `ahAwayPlus1Win` — Asian handicap -1/+1
-- Value bet objects now include `sharpMoney` (bool) and `oddsMovement` (ratio)
+- Value bet objects now include `sharpMoney` (bool), `oddsMovement` (ratio), `pinnacleProb` (%), `clvVsPinnacle` (%) — the last two populated when Pinnacle odds are available
 
 ### Visualizer (`visualizador/index.html`)
 
@@ -165,7 +172,7 @@ Single-file static app. State persisted via `localStorage` (`bwg_state` key).
 
 Views: `activeDate` = date string / `"ALL"` / `"BEST"` / `"VALUE"` / `"TRACK"` / `"BACK"` / `"WIN"` / `"BETNOW"`.
 
-Match modal shows: sub-model breakdown, score grid heatmap, context tags, stats (Over 1.5/2.5/3.5/4.5, BTTS+O25, Asian HCap), H2H, value bets with sharp money flag, AI advisor note.
+Match modal shows: sub-model breakdown, score grid heatmap, context tags, stats (Over 1.5/2.5/3.5/4.5, BTTS+O25, Asian HCap), H2H, value bets with sharp money flag + Pinnacle CLV, AI advisor note.
 
 TRACK view shows: global metrics, per-league table, per-stars table, **ROI per context tag**, bankroll curve, calibration diagram, sub-model accuracy.
 
@@ -196,9 +203,16 @@ All entry-point scripts call `sys.stdout.reconfigure(encoding="utf-8")` at start
 `tracker.py` and `backtest.py` use **proportional staking**: `unit_stake = 1 / n_bets`. Never switch to flat 1-unit stakes.
 
 ### Backtest-derived calibration (current baseline: 2023+2024 seasons)
-Global: Accuracy=51.9%, Brier=0.5933, ROI=-3.3% (at fair odds).
-Per league: PL=-2.3%, PD=-1.2%, BL1=-7.3%, FL1=-3.4%.
+Global: Accuracy=51.8%, Brier=0.5927, ROI=-2.9% (at fair odds).
+Per league: PL=-1.7%, PD=-1.3%, BL1=-6.5%, FL1=-2.7%.
 ROI is negative at fair odds by design — real edge comes from value bets against market odds.
+
+Draw model pretrain (6595 matches): tasa_draw=0.249, loss=0.5577.
+Weights: bias=-1.86, dc=+2.29, elo=+1.61, h2h=+0.10, mkt=-0.62.
+Interpretation: DC and Elo draw probs are the strongest predictors; market draw implied prob slightly corrects downward (market overprices draws).
 
 ### meta_learner distribution shift
 `source='live'` vs `source='backtest'` column separates real picks from seeds. `meta_learner.train(real_only=True)` enforces this. If predictions look wrong: `rename cache\meta_learner.pkl cache\meta_learner.pkl.bak`.
+
+### draw_model source guard
+`cache/draw_model.json` has a `"source"` field: `"backtest_pretrain"` or `"live"`. Running backtest again will NOT overwrite a live-trained model. To reset to backtest pretrain: delete the file and re-run backtest.
