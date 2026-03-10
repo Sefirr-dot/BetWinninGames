@@ -3296,7 +3296,7 @@ function confirmBankroll() {
 }
 
 function resetBankroll() {
-  if (!confirm('¿_t('btn_reset') bankroll y borrar historial? No se puede deshacer.')) return;
+  if (!confirm(_t('confirm_reset'))) return;
   localStorage.removeItem(_BRL_KEY);
   localStorage.removeItem(_HIST_KEY);
   saveSlip([]);
@@ -3459,9 +3459,9 @@ async function analyzeRiskWithOllama() {
     return;
   }
 
-  btn.disabled = true; btn.textContent = '_t('btn_analyzing')';
+  btn.disabled = true; btn.textContent = _t('btn_analyzing');
   box.style.display = 'block';
-  box.innerHTML = '<span style="color:var(--muted)">_t('ollama_querying')</span>';
+  box.innerHTML = `<span style="color:var(--muted)">${_t('ollama_querying')}</span>`;
 
   // Build context depending on whether we're in combinada tab or activo tab
   const isCombinada = _slipTab === 'combined';
@@ -3507,9 +3507,9 @@ CONSEJO: (1-2 frases concretas)`;
     const txt = (d.message?.content || 'Sin respuesta').replace(/\n/g, '<br>');
     box.innerHTML = `<div style="line-height:1.7">${txt}</div>`;
   } catch(e) {
-    box.innerHTML = '<span style="color:var(--accent-orange)">_t('ollama_unavail')</span>';
+    box.innerHTML = `<span style="color:var(--accent-orange)">${_t('ollama_unavail')}</span>`;
   } finally {
-    btn.disabled = false; btn.textContent = '_t('btn_ollama')';
+    btn.disabled = false; btn.textContent = _t('btn_ollama');
   }
 }
 
