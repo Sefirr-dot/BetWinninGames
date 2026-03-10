@@ -44,9 +44,14 @@ def _fv(mc_over25: float, lam_plus_mu: float, btts_prob: float) -> np.ndarray:
     return np.array([1.0, mc_over25, lam_plus_mu, btts_prob], dtype=float)
 
 
+_L2 = 0.01  # L2 regularisation — prevents unstable convergence across backtest runs
+
+
 def _log_loss(weights: np.ndarray, X: np.ndarray, y: np.ndarray) -> float:
     probs = np.clip(expit(X @ weights), 1e-7, 1 - 1e-7)
-    return -float(np.mean(y * np.log(probs) + (1 - y) * np.log(1 - probs)))
+    nll   = -float(np.mean(y * np.log(probs) + (1 - y) * np.log(1 - probs)))
+    l2    = _L2 * float(np.sum(weights[1:] ** 2))  # skip bias term
+    return nll + l2
 
 
 # ---------------------------------------------------------------------------

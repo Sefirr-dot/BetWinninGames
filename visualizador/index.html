@@ -2619,6 +2619,26 @@ function renderTrackingView() {
           </td>
         </tr>`;
       }).join('');
+    // Compute combined 4+★ and 5★ rows from per-stars data
+    const _combinedRow = (minStars, label) => {
+      const tiers = Object.entries(m.per_stars).filter(([s]) => Number(s) >= minStars);
+      if (!tiers.length) return '';
+      const totalN   = tiers.reduce((s, [,d]) => s + d.n, 0);
+      const wAcc     = tiers.reduce((s, [,d]) => s + d.accuracy * d.n, 0) / totalN;
+      const wRoi     = tiers.reduce((s, [,d]) => s + d.roi * d.n, 0) / totalN;
+      const accC     = wAcc >= 0.65 ? 'var(--accent-green)' : wAcc >= 0.55 ? 'var(--accent-yellow)' : 'var(--pd)';
+      const roiC     = wRoi > 0 ? 'var(--accent-green)' : wRoi < 0 ? 'var(--pd)' : 'var(--muted)';
+      return `<tr style="border-top:2px solid var(--border);background:var(--surface2)">
+        <td style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:var(--accent-teal)">${label}</td>
+        <td style="color:var(--muted)">${totalN}</td>
+        <td style="color:${accC};font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700">${(wAcc*100).toFixed(1)}%</td>
+        <td style="color:${roiC};font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700">${wRoi>0?'+':''}${(wRoi*100).toFixed(1)}%</td>
+        <td style="color:var(--muted);font-size:11px">combinado</td>
+        <td><div style="background:var(--surface2);border-radius:4px;height:8px;overflow:hidden">
+          <div style="background:${accC};height:100%;width:${(wAcc*100).toFixed(0)}%;border-radius:4px"></div>
+        </div></td>
+      </tr>`;
+    };
     starsBreakdownHtml = `
       <div class="bankroll-chart" style="margin-top:16px">
         <div class="bankroll-chart-title">Desglose por Estrellas</div>
@@ -2627,7 +2647,7 @@ function renderTrackingView() {
             <thead><tr>
               <th>Tier</th><th>Picks</th><th>Accuracy</th><th>ROI</th><th>Edge real</th><th>Barra</th>
             </tr></thead>
-            <tbody>${starRows}</tbody>
+            <tbody>${starRows}${_combinedRow(4,'4+★ combinado')}${_combinedRow(5,'5★ solo')}</tbody>
           </table>
         </div>
       </div>`;

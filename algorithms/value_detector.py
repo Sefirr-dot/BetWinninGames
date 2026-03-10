@@ -20,7 +20,8 @@ import re
 import unicodedata
 
 from config import (ODDS_DIR, VALUE_BET_EDGE_THRESHOLD, VALUE_BET_EDGE_STEP,
-                    VALUE_BET_MIN_STARS, VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE,
+                    VALUE_BET_MIN_STARS, VALUE_BET_MIN_STARS_BY_LEAGUE,
+                    VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE,
                     VALUE_BET_MIN_ODDS,
                     ANTIDRAW_SQUEEZE_THRESHOLD, ANTIDRAW_SQUEEZE_FACTOR,
                     ANTIDRAW_EDGE_BONUS_MAX)
@@ -269,9 +270,10 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
             continue
 
         stars = pred.get("stars", 3)
-        if stars < VALUE_BET_MIN_STARS:
-            continue
         league = mi.get("_league_code", "")
+        min_stars = VALUE_BET_MIN_STARS_BY_LEAGUE.get(league, VALUE_BET_MIN_STARS)
+        if stars < min_stars:
+            continue
         base_threshold = VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE.get(league, VALUE_BET_EDGE_THRESHOLD)
         effective_threshold = base_threshold + (5 - stars) * VALUE_BET_EDGE_STEP
 

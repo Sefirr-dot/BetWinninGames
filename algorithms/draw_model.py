@@ -52,9 +52,14 @@ def _fv(dc_draw: float, elo_draw: float, h2h_draw: float, mkt_draw: float) -> np
 # Training
 # ---------------------------------------------------------------------------
 
+_L2 = 0.01  # L2 regularisation strength — stabilises convergence to unique minimum
+
+
 def _log_loss(weights: np.ndarray, X: np.ndarray, y: np.ndarray) -> float:
     probs = np.clip(expit(X @ weights), 1e-7, 1 - 1e-7)
-    return -float(np.mean(y * np.log(probs) + (1 - y) * np.log(1 - probs)))
+    nll   = -float(np.mean(y * np.log(probs) + (1 - y) * np.log(1 - probs)))
+    l2    = _L2 * float(np.sum(weights[1:] ** 2))  # skip bias term
+    return nll + l2
 
 
 def train(db_path: str) -> str:
