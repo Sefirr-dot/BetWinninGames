@@ -1430,9 +1430,9 @@ const T = {
   empty_history: { es: 'No hay bets registrados todavía.', en: 'No bets recorded yet.' },
   empty_parlay:  { es: 'Añade al menos 2 picks al slip para construir una combinada.', en: 'Add at least 2 picks to the slip to build a parlay.' },
   // Ollama
-  ollama_add_first:  { es: '_t('ollama_add_first')', en: 'Add picks first.' },
-  ollama_querying:   { es: '_t('ollama_querying')', en: 'Querying Qwen3...' },
-  ollama_unavail:    { es: '_t('ollama_unavail')', en: 'Ollama unavailable at localhost:11434 — is it running?' },
+  ollama_add_first:  { es: 'Añade picks primero.',                                         en: 'Add picks first.' },
+  ollama_querying:   { es: 'Consultando Qwen3...',                                          en: 'Querying Qwen3...' },
+  ollama_unavail:    { es: 'Ollama no disponible en localhost:11434 — ¿está corriendo?',    en: 'Ollama unavailable at localhost:11434 — is it running?' },
   // Stake / odds labels
   lbl_odds:      { es: 'Cuota',          en: 'Odds' },
   lbl_stake:     { es: 'Stake €',        en: 'Stake €' },
@@ -1455,7 +1455,7 @@ const T = {
   lbl_league:    { es: 'Liga',        en: 'League' },
   lbl_bet:       { es: 'Apuesta',     en: 'Bet' },
   lbl_result:    { es: 'Resultado',   en: 'Result' },
-  confirm_reset: { es: '¿_t('btn_reset') bankroll y borrar historial? No se puede deshacer.', en: 'Reset bankroll and clear all history? This cannot be undone.' },
+  confirm_reset: { es: '¿Resetear bankroll y borrar historial? No se puede deshacer.', en: 'Reset bankroll and clear all history? This cannot be undone.' },
 };
 function _t(key) { return (T[key] || {})[LANG] || (T[key] || {})['en'] || key; }
 
