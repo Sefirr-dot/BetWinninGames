@@ -578,6 +578,15 @@ def run_tracker(quiet: bool = False, no_update: bool = False, no_report: bool = 
             if not quiet:
                 print(f"  [tracker] draw_model: {_e}")
 
+        try:
+            from algorithms.over25_model import train as _train_o25
+            _o25_result = _train_o25(PICKS_DB)
+            if not quiet:
+                print(f"  [tracker] {_o25_result}")
+        except Exception as _e:
+            if not quiet:
+                print(f"  [tracker] over25_model: {_e}")
+
     # 4. Save metrics snapshot for downstream consumers (e.g. dynamic Kelly)
     if metrics:
         _save_metrics_json(metrics)

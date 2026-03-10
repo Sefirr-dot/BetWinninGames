@@ -21,7 +21,9 @@ import unicodedata
 
 from config import (ODDS_DIR, VALUE_BET_EDGE_THRESHOLD, VALUE_BET_EDGE_STEP,
                     VALUE_BET_MIN_STARS, VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE,
-                    VALUE_BET_MIN_ODDS)
+                    VALUE_BET_MIN_ODDS,
+                    ANTIDRAW_SQUEEZE_THRESHOLD, ANTIDRAW_SQUEEZE_FACTOR,
+                    ANTIDRAW_EDGE_BONUS_MAX)
 
 _TRACKER_METRICS_PATH = "cache/tracker_metrics.json"
 _KELLY_MIN_PICKS = 20   # minimum resolved picks per league to trust the ROI estimate
@@ -295,6 +297,22 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
         if (odds.get("odds_btts") or 0) > 1.0:
             checks.append(("btts", pred.get("btts_prob", 0.0), odds["odds_btts"]))
 
+        # Anti-draw squeeze: when market overprices draw vs model, the model is
+        # confident that home/away is underpriced. Partially redistribute the
+        # draw mispricing as an edge bonus on the competing outcomes.
+        # Derived from draw_model weight mkt=-0.62 (market overvalues draws).
+        _draw_squeeze = 0.0
+        try:
+            _r1 = 1 / odds["odds_1"]; _rx = 1 / odds["odds_x"]; _r2 = 1 / odds["odds_2"]
+            _rs = _r1 + _rx + _r2
+            _mkt_draw_clean = _rx / _rs
+            _gap = _mkt_draw_clean - pred.get("prob_draw", 0.0)
+            if _gap > ANTIDRAW_SQUEEZE_THRESHOLD:
+                _draw_squeeze = min(ANTIDRAW_EDGE_BONUS_MAX,
+                                    _gap * ANTIDRAW_SQUEEZE_FACTOR)
+        except (KeyError, ZeroDivisionError):
+            pass
+
         for outcome, model_prob, bk_odds in checks:
             if bk_odds <= VALUE_BET_MIN_ODDS:
                 continue  # market too efficient at short odds — skip
@@ -307,7 +325,10 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
             mv_ratio = (movement.get(_outcome_mv_key, 1.0)
                         if movement and _outcome_mv_key else 1.0)
             sharp_money = mv_ratio >= 1.10
-            effective_edge = edge + (0.02 if sharp_money else 0.0)
+
+            # Anti-draw squeeze bonus applies only to home/away (not draw/markets)
+            _squeeze_bonus = _draw_squeeze if outcome in ("home", "away") else 0.0
+            effective_edge = edge + (0.02 if sharp_money else 0.0) + _squeeze_bonus
 
             if effective_edge >= effective_threshold:
                 kelly = _kelly_fraction(effective_edge, bk_odds, stars, league)
@@ -330,9 +351,10 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
                     "home_name":       home_name,
                     "away_name":       away_name,
                     "odds_movement":   mv_ratio if movement and _outcome_mv_key else None,
-                    "sharp_money":     sharp_money,
-                    "pinnacle_prob":   pin_prob,
-                    "clv_vs_pinnacle": clv_vs_pinnacle,
+                    "sharp_money":       sharp_money,
+                    "antidraw_squeeze":  round(_squeeze_bonus * 100, 1) if _squeeze_bonus else None,
+                    "pinnacle_prob":     pin_prob,
+                    "clv_vs_pinnacle":   clv_vs_pinnacle,
                 })
 
     return sorted(value_bets, key=lambda x: x["edge"], reverse=True)

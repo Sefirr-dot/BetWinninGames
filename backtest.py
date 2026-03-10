@@ -797,14 +797,21 @@ def main():
     print(f"  Informe:       {output_path}")
     print(f"  JS:            {js_path}")
 
-    # Always pretrain draw model from backtest results (cheap, no DB required).
-    # Skips automatically if a live-trained model already exists.
+    # Always pretrain draw + over25 models (cheap, no DB required).
+    # Each skips automatically if a live-trained model already exists.
     try:
         from algorithms.draw_model import pretrain_from_backtest as _pretrain_draw
         _dr = _pretrain_draw(all_results)
         print(f"  Draw model:    {_dr}")
     except Exception as _e:
         print(f"  Draw model:    error — {_e}")
+
+    try:
+        from algorithms.over25_model import pretrain_from_backtest as _pretrain_o25
+        _o25r = _pretrain_o25(all_results)
+        print(f"  Over25 model:  {_o25r}")
+    except Exception as _e:
+        print(f"  Over25 model:  error — {_e}")
 
     if args.seed_db:
         print(f"\n  Sembrando picks_history.db...")

@@ -20,6 +20,7 @@ from algorithms import calibrator as _calibrator
 from algorithms import weight_optimizer as _wopt
 from algorithms import meta_learner as _meta_learner
 from algorithms import draw_model as _draw_model
+from algorithms import over25_model as _over25_model
 
 # Load once at import time; falls back to config defaults when file absent
 _calib_params    = _calibrator.load_calibrator()
@@ -27,6 +28,7 @@ _dynamic_weights = _wopt.load_weights()
 _eff_weights     = {**MODEL_WEIGHTS, **_dynamic_weights} if _dynamic_weights else MODEL_WEIGHTS
 _ml_model        = _meta_learner.load_model()
 _draw_weights    = _draw_model.load_model()
+_over25_weights  = _over25_model.load_model()
 
 
 def _blend_1x2(
@@ -423,6 +425,15 @@ def predict_match(
     # Use MC for secondary markets — more accurate than Poisson-exact and
     # adds Over 1.5 / Over 3.5 / Over 4.5 / Asian HCap / BTTS combos
     dc_over25 = mc["over25"]
+
+    # Over25 calibration: replace raw MC estimate with trained model when available
+    if _over25_weights is not None:
+        dc_over25 = _over25_model.predict(
+            mc_over25=dc_over25,
+            lam_plus_mu=lam + mu,
+            btts_prob=btts_prob,
+            weights=_over25_weights,
+        )
 
     # --- Corners ---
     corners_pred = corners.predict(lam, mu)

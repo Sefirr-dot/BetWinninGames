@@ -86,6 +86,7 @@ All keys live in `config.py` (gitignored — copy from `config.example.py`):
 | `cards` | n/a | Display-only linear proxy. |
 | `meta_learner` | override | XGBoost. **Only trains on `source='live'` picks** (never on backtest seeds). Activated when `cache/meta_learner.pkl` exists. Skips Platt calibration when active. |
 | `draw_model` | n/a | Logistic regression (scipy) draw classifier. Features: `dc_draw`, `elo_draw`, `h2h_draw`, `mkt_draw`. **Replaces** the hand-tuned draw nudge in ensemble when `cache/draw_model.json` exists. Pre-trains from backtest automatically; fine-tunes on live picks (≥50) via tracker. `source` field in JSON distinguishes `backtest_pretrain` vs `live` — live model is never overwritten by backtest. |
+| `over25_model` | n/a | Logistic regression calibrator for Over 2.5. Features: `mc_over25` (MC raw), `lam+mu`, `btts_prob`. **Replaces** raw MC over25 output when `cache/over25_model.json` exists. Same train/pretrain/source-guard pattern as draw_model. |
 | `match_context` | n/a | `classify(elo_pred, form_pred, h2h_pred, home_pos, away_pos)` → tags list. Tags: `even_match`, `top6_clash`, `relegation_6ptr`, `home_in_form`, `away_in_form`, `h2h_dominant`. Combined with `motivation` tags in `_tags`. |
 
 ### Calibrator and weight optimizer (auto-loading)
@@ -192,7 +193,8 @@ Both log to `logs/` with date-stamped filenames.
 `ELO_HOME_BONUS_BY_LEAGUE` — BL1=92 after tuning (was 80).
 `DRAW_RATE_BY_LEAGUE` — BL1=0.248 after tuning (was 0.230).
 `MARKET_BLEND_WEIGHT=0.20` — reduced to 25%/50% for stale odds (>6h/>2h old).
-`VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE` — PL/PD/FL1=8%, BL1=12%.
+`VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE` — PL/PD/FL1=8%, BL1=15% (raised from 12% due to -6.5% backtest ROI).
+`ANTIDRAW_SQUEEZE_THRESHOLD=0.05`, `ANTIDRAW_SQUEEZE_FACTOR=0.40`, `ANTIDRAW_EDGE_BONUS_MAX=0.04` — when market draw prob exceeds model draw by >5%, home/away bets get up to +4% edge bonus (exploits draw_model mkt weight=-0.62).
 
 ## Notes
 
@@ -214,5 +216,5 @@ Interpretation: DC and Elo draw probs are the strongest predictors; market draw 
 ### meta_learner distribution shift
 `source='live'` vs `source='backtest'` column separates real picks from seeds. `meta_learner.train(real_only=True)` enforces this. If predictions look wrong: `rename cache\meta_learner.pkl cache\meta_learner.pkl.bak`.
 
-### draw_model source guard
-`cache/draw_model.json` has a `"source"` field: `"backtest_pretrain"` or `"live"`. Running backtest again will NOT overwrite a live-trained model. To reset to backtest pretrain: delete the file and re-run backtest.
+### over25_model / draw_model source guard
+`cache/draw_model.json` and `cache/over25_model.json` both have a `"source"` field: `"backtest_pretrain"` or `"live"`. Running backtest again will NOT overwrite a live-trained model. To reset: delete the file and re-run backtest.
