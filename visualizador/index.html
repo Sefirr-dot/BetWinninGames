@@ -3547,22 +3547,78 @@ function renderSlipView() {
           </div>
         </div>` : '';
 
-      const histRows = [...hist].sort((a,b) => (b.placedAt||'') > (a.placedAt||'') ? 1 : -1).map(b => {
-        const badgeHtml = b.settled
-          ? (b.result==='won'
+      const histRows = [...hist].sort((a,b) => (b.placedAt||'') > (a.placedAt||'') ? 1 : -1).map((b, idx) => {
+        const badge = b.settled
+          ? (b.result === 'won'
             ? `<span class="hist-badge-won">GANADO +€${b.pnl.toFixed(2)}</span>`
             : `<span class="hist-badge-lost">PERDIDO -€${Math.abs(b.pnl).toFixed(2)}</span>`)
           : `<span class="hist-badge-pending">PENDIENTE</span>`;
-        const desc = b.type === 'combinada'
-          ? `Combinada ${b.legs?.length} piernas @${b.combinedOdds}`
-          : `${b.homeName} vs ${b.awayName} · ${_outcomeLabel(b.outcome)} @${b.oddsUser}`;
+
+        const title = b.type === 'combinada'
+          ? `🔗 Combinada ${b.legs?.length} piernas @${b.combinedOdds}`
+          : `${b.homeName} vs ${b.awayName}`;
+
+        // Detail content
+        let detail = '';
+        if (b.type === 'combinada') {
+          const legsHtml = (b.legs || []).map((leg, i) => {
+            const legRes = window.RESOLVED_RESULTS?.[`${leg.homeName}|${leg.awayName}|${leg.matchDate}`];
+            const legWon = legRes ? resolveOutcome(leg.outcome, legRes) : null;
+            const legIcon = legWon === true ? '✅' : legWon === false ? '❌' : '⏳';
+            return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+              <span style="color:var(--muted);min-width:16px;font-size:12px">${i+1}</span>
+              <span style="font-size:12px">${leg.homeName} vs ${leg.awayName}</span>
+              <span style="color:${_outcomeColor(leg.outcome)};font-size:11px;font-weight:600">${_outcomeLabel(leg.outcome)}</span>
+              <span style="color:var(--muted);font-size:11px">@${leg.oddsUser}</span>
+              <span style="margin-left:auto">${legIcon}</span>
+            </div>`;
+          }).join('');
+          detail = `
+            <div style="margin:4px 0 2px;font-size:11px;color:var(--muted)">Piernas:</div>
+            ${legsHtml}
+            <div style="display:flex;gap:16px;margin-top:8px;font-size:12px">
+              <span style="color:var(--muted)">Stake <b style="color:var(--text)">€${b.stake}</b></span>
+              <span style="color:var(--muted)">Cuota combinada <b style="color:var(--accent-gold)">@${b.combinedOdds}</b></span>
+              <span style="color:var(--muted)">Retorno potencial <b style="color:var(--accent-green)">€${(b.stake * b.combinedOdds).toFixed(2)}</b></span>
+            </div>`;
+        } else {
+          const pResult = b.settled ? (b.result === 'won' ? `+€${b.pnl.toFixed(2)}` : `-€${Math.abs(b.pnl).toFixed(2)}`) : 'Pendiente';
+          const pColor  = !b.settled ? 'var(--muted)' : b.result === 'won' ? 'var(--accent-green)' : 'var(--accent-orange)';
+          detail = `
+            <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12px;margin-top:4px">
+              <span style="color:var(--muted)">Liga <b style="color:var(--text)">${b.league||'—'}</b></span>
+              <span style="color:var(--muted)">Apuesta <b style="color:${_outcomeColor(b.outcome)}">${_outcomeLabel(b.outcome)}</b></span>
+              <span style="color:var(--muted)">Cuota <b style="color:var(--accent-gold)">@${b.oddsUser}</b></span>
+              <span style="color:var(--muted)">Stake <b style="color:var(--text)">€${b.stake}</b></span>
+              <span style="color:var(--muted)">Retorno potencial <b style="color:var(--accent-green)">€${(b.stake * b.oddsUser).toFixed(2)}</b></span>
+              <span style="color:var(--muted)">Resultado <b style="color:${pColor}">${pResult}</b></span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:6px">
+              Registrado: ${(b.placedAt||'').replace('T',' ').slice(0,16)}
+              ${b.settledAt ? ' · Liquidado: ' + b.settledAt.replace('T',' ').slice(0,16) : ''}
+            </div>`;
+        }
+
+        const detailId = `hist-detail-${idx}`;
         return `
-        <div class="hist-row">
-          <div style="flex:1;min-width:180px">
-            <div style="font-size:13px;font-weight:600">${desc}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px">${(b.placedAt||'').slice(0,10)} · ${b.league||''} · Stake €${b.stake}</div>
+        <div>
+          <div class="hist-row" onclick="(()=>{const d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'})()"
+            style="cursor:pointer;user-select:none">
+            <div style="flex:1;min-width:180px">
+              <div style="font-size:13px;font-weight:600">${title}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:3px">
+                ${(b.placedAt||'').slice(0,10)} · Stake €${b.stake}
+                ${b.type !== 'combinada' ? '· ' + (b.league||'') : ''}
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              ${badge}
+              <span style="color:var(--muted);font-size:14px">▾</span>
+            </div>
           </div>
-          ${badgeHtml}
+          <div id="${detailId}" style="display:none;background:var(--surface2);border-radius:0 0 8px 8px;padding:12px 14px;margin-bottom:4px;border:1px solid var(--border);border-top:none">
+            ${detail}
+          </div>
         </div>`;
       }).join('');
 
