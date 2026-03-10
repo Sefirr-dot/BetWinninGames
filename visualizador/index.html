@@ -1395,6 +1395,12 @@ select.sort-select:focus { border-color: #3d6090; }
       </div>
     </div>
 
+    <!-- Calendar -->
+    <div style="margin-bottom:20px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px" id="ap-lbl-dates">Dates</div>
+      <div id="ap-calendar" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+
     <!-- Leagues -->
     <div style="margin-bottom:20px">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px" id="ap-lbl-leagues">Leagues</div>
@@ -3451,11 +3457,16 @@ function saveProfile(p) {
 }
 
 function saveAutopilotProfile() {
-  const risk    = document.querySelector('input[name="ap-risk"]:checked')?.value || 'balanced';
-  const maxBets = parseInt(document.querySelector('input[name="ap-maxbets"]:checked')?.value || '3');
-  const leagues = [...document.querySelectorAll('.ap-league-cb:checked')].map(el => el.value);
+  const risk        = document.querySelector('input[name="ap-risk"]:checked')?.value || 'balanced';
+  const maxBets     = parseInt(document.querySelector('input[name="ap-maxbets"]:checked')?.value || '3');
+  const leagues     = [...document.querySelectorAll('.ap-league-cb:checked')].map(el => el.value);
+  const activeDates = [...document.querySelectorAll('.ap-date-btn')]
+    .filter(el => el.style.borderColor === 'var(--accent-teal)')
+    .map(el => el.dataset.date);
   if (!leagues.length) { alert(_t('auto_wiz_lg') + '?'); return; }
-  saveProfile({ riskLevel: risk, maxBetsPerDay: maxBets, leagues,
+  // If no dates selected, default to all
+  const finalDates = activeDates.length ? activeDates : (typeof DATES !== 'undefined' ? [...DATES] : []);
+  saveProfile({ riskLevel: risk, maxBetsPerDay: maxBets, leagues, activeDates: finalDates,
     markets: ['1x2','over25','btts'], minOdds: 1.40, minStars: 5, maxExposurePct: 10 });
   document.getElementById('autopilot-wizard').style.display = 'none';
   renderAutopilotView();
@@ -3475,6 +3486,7 @@ function selectAutopilotBets() {
     if (!m.valueBets?.length) return;
     if (m.stars < profile.minStars) return;
     if (!profile.leagues.includes(m.league)) return;
+    if (profile.activeDates?.length && !profile.activeDates.includes(m.date)) return;
 
     m.valueBets.forEach(vb => {
       if (vb.bkOdds < profile.minOdds) return;
@@ -3620,6 +3632,29 @@ function autopilotAddAll() {
   render();
 }
 
+function _buildCalendar(savedDates) {
+  const cal = document.getElementById('ap-calendar');
+  if (!cal || typeof DATES === 'undefined') return;
+  const dayNames = { es: ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'], en: ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] };
+  const names = dayNames[LANG] || dayNames.en;
+  cal.innerHTML = DATES.map(d => {
+    const [y,m,day] = d.split('-').map(Number);
+    const dow   = new Date(y, m-1, day).getDay();
+    const label = `${names[dow]}<br><span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800">${String(day).padStart(2,'0')}/${String(m).padStart(2,'0')}</span>`;
+    const active = !savedDates || savedDates.includes(d);
+    const style  = active ? 'border-color:var(--accent-teal);background:rgba(20,184,166,.15);color:var(--accent-teal)' : '';
+    return `<div class="ap-check-btn ap-date-btn" data-date="${d}" onclick="_toggleDate(this)"
+      style="padding:8px 14px;text-align:center;font-size:11px;font-weight:600;line-height:1.4;${style}">${label}</div>`;
+  }).join('');
+}
+
+function _toggleDate(el) {
+  const active = el.style.borderColor === 'var(--accent-teal)';
+  el.style.borderColor = active ? '' : 'var(--accent-teal)';
+  el.style.background  = active ? '' : 'rgba(20,184,166,.15)';
+  el.style.color       = active ? '' : 'var(--accent-teal)';
+}
+
 function applyWizardI18n() {
   const get = id => document.getElementById(id);
   if (get('ap-wiz-title')) get('ap-wiz-title').textContent = _t('auto_wiz_title');
@@ -3627,17 +3662,25 @@ function applyWizardI18n() {
   if (get('ap-lbl-risk'))  get('ap-lbl-risk').textContent  = _t('auto_wiz_risk');
   if (get('ap-lbl-maxbets')) get('ap-lbl-maxbets').textContent = _t('auto_wiz_max');
   if (get('ap-lbl-leagues'))  get('ap-lbl-leagues').textContent = _t('auto_wiz_lg');
+  if (get('ap-lbl-dates'))    get('ap-lbl-dates').textContent   = LANG === 'es' ? 'Fechas' : 'Dates';
   if (get('ap-wiz-btn'))   get('ap-wiz-btn').textContent   = _t('auto_wiz_btn');
   if (get('ap-risk-conservative')) get('ap-risk-conservative').textContent = _t('auto_risk_con');
   if (get('ap-risk-balanced'))     get('ap-risk-balanced').textContent     = _t('auto_risk_bal');
   if (get('ap-risk-aggressive'))   get('ap-risk-aggressive').textContent   = _t('auto_risk_agg');
+
   const p = loadProfile();
-  if (!p) return;
-  const r = document.querySelector(`input[name="ap-risk"][value="${p.riskLevel}"]`);
-  if (r) r.checked = true;
-  const b = document.querySelector(`input[name="ap-maxbets"][value="${p.maxBetsPerDay}"]`);
-  if (b) b.checked = true;
-  document.querySelectorAll('.ap-league-cb').forEach(cb => { cb.checked = p.leagues.includes(cb.value); });
+  // Restore saved selections
+  const r = document.querySelector(`input[name="ap-risk"][value="${p?.riskLevel||'balanced'}"]`);
+  if (r) { r.checked = true; r.dispatchEvent(new Event('change', {bubbles:true})); }
+  const b = document.querySelector(`input[name="ap-maxbets"][value="${p?.maxBetsPerDay||3}"]`);
+  if (b) { b.checked = true; b.dispatchEvent(new Event('change', {bubbles:true})); }
+  document.querySelectorAll('.ap-league-cb').forEach(cb => {
+    cb.checked = !p || p.leagues.includes(cb.value);
+    cb.nextElementSibling.style.borderColor = cb.checked ? 'var(--accent-teal)' : '';
+    cb.nextElementSibling.style.background  = cb.checked ? 'rgba(20,184,166,.15)' : '';
+  });
+  // Build calendar with saved dates
+  _buildCalendar(p?.activeDates || null);
 }
 
 // ═══════════════════════════════════════════════════════════
