@@ -3615,12 +3615,75 @@ function renderAutopilotView() {
   : `<div class="ap-empty"><div style="font-size:40px;margin-bottom:12px">🤖</div><div style="white-space:pre-line">${_t('auto_no_picks')}</div></div>`;
 
   const footer = picks.length ? `
-  <div style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px;margin-top:8px">
+  <div style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+    <button id="ap-ollama-btn" onclick="autopilotAnalyzeAI()"
+      style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 18px;color:var(--text);cursor:pointer;font-size:14px;font-weight:600">
+      🤖 ${LANG==='es'?'Analizar con IA':'Analyze with AI'}
+    </button>
     <button onclick="autopilotAddAll()" class="slip-cta" style="flex:1">${_t('auto_accept')}</button>
-  </div>` : '';
+  </div>
+  <div id="ap-ollama-box" class="ollama-box" style="display:none;margin:0 24px 16px"></div>` : '';
 
   container.innerHTML = header + summaryBar + relaxWarn + corrWarn +
     `<div style="padding:16px 0;display:flex;flex-direction:column;gap:10px">${pickCards}</div>` + footer;
+}
+
+async function autopilotAnalyzeAI() {
+  const { picks } = selectAutopilotBets();
+  const brl = loadBankroll();
+  const btn = document.getElementById('ap-ollama-btn');
+  const box = document.getElementById('ap-ollama-box');
+  if (!btn || !box) return;
+  if (!picks.length) { box.style.display='block'; box.innerHTML=`<span style="color:var(--muted)">${LANG==='es'?'Sin picks para analizar.':'No picks to analyze.'}</span>`; return; }
+
+  btn.disabled = true;
+  btn.textContent = LANG==='es' ? '⏳ Analizando...' : '⏳ Analyzing...';
+  box.style.display = 'block';
+  box.innerHTML = `<span style="color:var(--muted)">${LANG==='es'?'Consultando Qwen3...':'Querying Qwen3...'}</span>`;
+
+  const profile     = loadProfile();
+  const totalStake  = picks.reduce((s,p) => s+p.stake, 0);
+  const totalEV     = picks.reduce((s,p) => s+p.ev, 0);
+  const exposurePct = brl ? (totalStake/brl.current*100).toFixed(1) : '?';
+  const riskLabel   = {conservative:'Conservative',balanced:'Balanced',aggressive:'Aggressive'}[profile?.riskLevel]||'Balanced';
+
+  const picksText = picks.map((p,i) => {
+    const outcome = {home:'Home Win',draw:'Draw',away:'Away Win',over25:'Over 2.5',btts:'BTTS'}[p.vb.outcome]||p.vb.outcome;
+    return `${i+1}. ${p.m.homeShort} vs ${p.m.awayShort} [${p.m.league}] ${p.m.stars}★ | ${outcome} @${p.vb.bkOdds} | Edge ${p.vb.edge}% | Stake €${p.stake} | EV +€${p.ev}${p.correlated?' [CORRELATED]':''}`;
+  }).join('\n');
+
+  const prompt = `You are a professional sports betting analyst. Analyze this automated betting plan in ${LANG==='es'?'Spanish':'English'}.
+
+PROFILE: ${riskLabel} risk | Max ${profile?.maxBetsPerDay||3} bets/day
+BANKROLL: €${brl?.current?.toFixed(2)||'?'} (initial €${brl?.initial?.toFixed(2)||'?'})
+TOTAL STAKE: €${totalStake.toFixed(2)} (${exposurePct}% of bankroll)
+TOTAL EV: +€${totalEV.toFixed(2)}
+
+PICKS:
+${picksText}
+
+Respond ONLY with:
+OVERALL RISK: (Low/Medium/High)
+PLAN QUALITY: (1-10 score with brief reason)
+PER-PICK: (one line per pick: pick number, brief comment on value/concern)
+RECOMMENDATION: (1-2 sentences of concrete advice)`;
+
+  try {
+    const r = await fetch('http://localhost:11434/api/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      signal: AbortSignal.timeout(90000),
+      body: JSON.stringify({ model:'qwen3.5:9b', messages:[{role:'user',content:prompt}],
+        stream:false, think:false, options:{temperature:0.1} })
+    });
+    const d = await r.json();
+    const txt = (d.message?.content||'No response').replace(/\n/g,'<br>');
+    box.innerHTML = `<div style="line-height:1.8">${txt}</div>`;
+  } catch(e) {
+    box.innerHTML = `<span style="color:var(--accent-orange)">${LANG==='es'?'Ollama no disponible en localhost:11434':'Ollama unavailable at localhost:11434'}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = `🤖 ${LANG==='es'?'Analizar con IA':'Analyze with AI'}`;
+  }
 }
 
 function autopilotAddAll() {
