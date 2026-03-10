@@ -705,6 +705,14 @@ def parse_args():
         help=f"Matches per walk-forward fold (default {BACKTEST_BATCH_SIZE})",
     )
     parser.add_argument(
+        "--min-stars",
+        type=int,
+        default=None,
+        choices=[1, 2, 3, 4, 5],
+        help="Only compute metrics for picks with >= this many stars (e.g. 4 for 4-5★ only). "
+             "Full walk-forward still runs on all matches; filter applied before metric calculation.",
+    )
+    parser.add_argument(
         "--seed-db",
         action="store_true",
         help="Seed picks_history.db with backtest results (marked as already resolved). "
@@ -770,19 +778,36 @@ def main():
         print("[WARNING] Sin resultados. Verifica disponibilidad de datos.")
         sys.exit(0)
 
-    print(f"\n  {len(all_results)} predicciones totales — calculando métricas globales...")
-    metrics    = compute_metrics(all_results)
-    fold_stats = compute_fold_metrics(all_results)
+    # Apply star filter if requested
+    eval_results = all_results
+    if args.min_stars:
+        eval_results = [r for r in all_results
+                        if r["prediction"].get("stars", 0) >= args.min_stars]
+        pct = len(eval_results) / max(len(all_results), 1) * 100
+        print(f"\n  Filtro {args.min_stars}+★: {len(eval_results)} picks "
+              f"({pct:.1f}% del total de {len(all_results)})")
+        if not eval_results:
+            print("  [WARNING] Sin picks con ese filtro de estrellas.")
+            sys.exit(0)
+
+    print(f"\n  {len(eval_results)} predicciones evaluadas — calculando métricas globales...")
+    metrics    = compute_metrics(eval_results)
+    fold_stats = compute_fold_metrics(eval_results)
 
     league_label = "ALL" if args.league == "ALL" else args.league
-    output_path  = generate_report(metrics, all_results, league_label, args.seasons, fold_stats)
+    star_suffix  = f"_{args.min_stars}plus_stars" if args.min_stars else ""
+    output_path  = generate_report(metrics, eval_results, league_label, args.seasons, fold_stats)
     js_path      = generate_backtest_js(
-        metrics, all_results, league_label, args.seasons,
+        metrics, eval_results, league_label, args.seasons,
         fold_stats=fold_stats,
         per_league=per_league_metrics,
     )
 
     print(f"\n{'='*60}")
+    if args.min_stars:
+        print(f"  FILTRO: {args.min_stars}+★ únicamente  "
+              f"({len(eval_results)} picks de {len(all_results)} totales, "
+              f"{len(eval_results)/max(len(all_results),1)*100:.1f}%)")
     if args.league == "ALL":
         print("  RESUMEN POR LIGA:")
         for lg, lm in per_league_metrics.items():
