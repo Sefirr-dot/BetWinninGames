@@ -810,8 +810,19 @@ def main():
               f"{len(eval_results)/max(len(all_results),1)*100:.1f}%)")
     if args.league == "ALL":
         print("  RESUMEN POR LIGA:")
-        for lg, lm in per_league_metrics.items():
-            _print_summary(lm, lg)
+        if args.min_stars:
+            # Recompute per-league metrics on filtered results
+            for lg in per_league_metrics:
+                lg_filtered = [r for r in eval_results
+                               if r["match"].get("_league_code") == lg]
+                if lg_filtered:
+                    lm_f = compute_metrics(lg_filtered)
+                    _print_summary(lm_f, lg)
+                else:
+                    print(f"    [{lg}] sin picks con {args.min_stars}+★")
+        else:
+            for lg, lm in per_league_metrics.items():
+                _print_summary(lm, lg)
         print()
     print(f"  GLOBAL — Accuracy={metrics['accuracy_1x2']*100:.1f}%  "
           f"Brier={metrics['brier_score']:.4f}  ROI={metrics['roi_flat']*100:+.1f}%")
