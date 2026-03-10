@@ -34,6 +34,33 @@
   --accent-teal: #14b8a6;
 }
 
+/* ── SLIP / BANKROLL ── */
+.slip-header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:20px 24px;border-bottom:1px solid var(--border);background:var(--surface)}
+.slip-bankroll-pill{display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px 16px}
+.slip-tabs{display:flex;gap:4px;padding:16px 24px 0}
+.slip-tab{padding:8px 18px;border-radius:8px 8px 0 0;background:var(--surface2);border:1px solid var(--border);border-bottom:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);transition:.15s}
+.slip-tab.active{background:var(--surface);color:var(--text);border-bottom-color:var(--surface)}
+.slip-body{padding:20px 24px;min-height:300px}
+.slip-row{display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.slip-row-info{flex:1;min-width:160px}
+.slip-row-match{font-weight:700;font-size:14px}
+.slip-row-meta{font-size:11px;color:var(--muted);margin-top:3px}
+.slip-odds-input{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;width:70px;text-align:center;outline:none}
+.slip-stake-input{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;width:80px;text-align:center;outline:none}
+.slip-warn{font-size:10px;color:var(--accent-orange);margin-top:3px}
+.slip-ok{font-size:10px;color:var(--accent-green);margin-top:3px}
+.slip-remove{background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;padding:4px;border-radius:4px}
+.slip-remove:hover{color:var(--accent-orange)}
+.slip-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:16px 24px;border-top:1px solid var(--border);background:var(--surface)}
+.slip-cta{background:var(--accent-green);border:none;border-radius:8px;padding:12px 28px;font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:700;color:#000;cursor:pointer}
+.slip-cta:disabled{opacity:.4;cursor:default}
+.ollama-box{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:16px;font-size:13px;line-height:1.6}
+.hist-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap}
+.hist-badge-won{background:#16a34a22;border:1px solid #16a34a;color:#22c55e;border-radius:5px;padding:2px 10px;font-size:11px;font-weight:700}
+.hist-badge-lost{background:#ef444422;border:1px solid #ef4444;color:#f87171;border-radius:5px;padding:2px 10px;font-size:11px;font-weight:700}
+.hist-badge-pending{background:#1e2d4566;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:2px 10px;font-size:11px;font-weight:700}
+.brl-curve-bar{height:6px;border-radius:3px;background:var(--accent-teal);transition:.3s}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
@@ -1299,10 +1326,32 @@ select.sort-select:focus { border-color: #3d6090; }
 
   <!-- BET NOW View -->
   <div id="betnow-container" style="display:none"></div>
+
+  <!-- SLIP / BANKROLL View -->
+  <div id="slip-container" style="display:none"></div>
 </div>
 
 </div><!-- /main-wrap -->
 </div><!-- /app-layout -->
+
+<!-- Bankroll Init Modal -->
+<div id="bankroll-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:36px;max-width:380px;width:90%;text-align:center">
+    <div style="font-size:36px;margin-bottom:12px">💰</div>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;margin-bottom:8px">Define tu bankroll</div>
+    <div style="color:var(--muted);font-size:13px;margin-bottom:24px">Esto se guarda solo una vez. Puedes cambiarlo después desde la vista Bankroll.</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:24px">
+      <span style="font-size:22px;color:var(--muted)">€</span>
+      <input id="bankroll-init-input" type="number" min="1" max="1000000" step="50" value="1000"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:700;color:var(--text);width:160px;text-align:center;outline:none"
+        onkeydown="if(event.key==='Enter')confirmBankroll()">
+    </div>
+    <button onclick="confirmBankroll()"
+      style="background:var(--accent-green);border:none;border-radius:10px;padding:14px 40px;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:#000;cursor:pointer;width:100%">
+      Empezar a trackear
+    </button>
+  </div>
+</div>
 
 <!-- Match Detail Modal -->
 <div id="match-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal()">
@@ -1317,6 +1366,8 @@ select.sort-select:focus { border-color: #3d6090; }
 <script src="data/tracker_data.js"></script>
 <script>if (typeof BACKTEST_DATA === 'undefined') window.BACKTEST_DATA = null;</script>
 <script src="data/backtest_data.js"></script>
+<script>if (typeof RESOLVED_RESULTS === 'undefined') window.RESOLVED_RESULTS = {};</script>
+<script src="data/results.js"></script>
 <script>
 // ── STATE ──
 function _loadState() {
@@ -1331,7 +1382,7 @@ function saveState() {
   } catch {}
 }
 const _saved = _loadState();
-let activeDate   = (DATES.includes(_saved.activeDate) || ['ALL','BEST','VALUE','TRACK','BACK','WIN','BETNOW'].includes(_saved.activeDate))
+let activeDate   = (DATES.includes(_saved.activeDate) || ['ALL','BEST','VALUE','TRACK','BACK','WIN','BETNOW','SLIP'].includes(_saved.activeDate))
                    ? _saved.activeDate : (DATES[0] || 'ALL');
 let activeLeague = _saved.activeLeague || "ALL";
 let sortMode     = _saved.sortMode     || "stars";
@@ -1429,7 +1480,11 @@ function buildSidebar() {
   const nPD = ALL_MATCHES.filter(m => m.league === 'PD').length;
   const bdAvail = window.BACKTEST_DATA !== null;
 
+  const nSlip = loadSlip().length;
+  const brl   = loadBankroll();
+  const slipBadge = nSlip > 0 ? nSlip : (brl ? '€'+brl.current.toFixed(0) : '—');
   const items = [
+    { id: 'SLIP',  icon: '🎯', label: 'Mi Bankroll',  badge: slipBadge,          cls: 'sb-active-track' },
     { id: 'BETNOW',icon: '💰', label: 'Bet Now',      badge: nBetNow,            cls: 'sb-active-value' },
     { id: 'BEST',  icon: '🏆', label: 'Top Picks',    badge: bestBets.length,    cls: 'sb-active-best'  },
     { id: 'VALUE', icon: '💎', label: 'Value Bets',   badge: nVB,                cls: 'sb-active-value' },
@@ -1688,6 +1743,21 @@ function renderCard(m) {
       </div>
 
       ${detailHtml}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)" onclick="event.stopPropagation()">
+        ${[
+          {outcome:'home',  label:`${m.homeShort} gana`, prob: m.prob1},
+          {outcome:'draw',  label:'Empate',               prob: m.probX},
+          {outcome:'away',  label:`${m.awayShort} gana`, prob: m.prob2},
+          ...(m.over25yn ? [{outcome:'over25', label:'Over 2.5', prob: m.over25}] : []),
+          ...(m.bttsyn   ? [{outcome:'btts',   label:'BTTS',     prob: m.btts}]   : []),
+        ].map(opt => {
+          const odds = m.fairOdds && opt.outcome === (m.prob1>=m.prob2?'home':'away') ? m.fairOdds : +(100/opt.prob).toFixed(2);
+          return `<button onclick="addToSlip('${m.home?.replace(/'/g,"\\'")||m.homeShort}','${m.away?.replace(/'/g,"\\'")||m.awayShort}','${m.league}','${m.date}','${opt.outcome}',${odds},null)"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text);cursor:pointer;font-size:11px;font-weight:600;display:flex;align-items:center;gap:5px">
+            <span style="color:${_outcomeColor(opt.outcome)}">+</span> ${opt.label}
+          </button>`;
+        }).join('')}
+      </div>
     </div>`;
 }
 
@@ -1725,13 +1795,18 @@ function render() {
   const vbContainer       = document.getElementById('vb-container');
   const winielaContainer  = document.getElementById('winiela-container');
   const betnowContainer   = document.getElementById('betnow-container');
+  const slipContainer     = document.getElementById('slip-container');
 
   function hideAll() {
     controls.style.display = summaryEl.style.display = grid.style.display = 'none';
     bbContainer.style.display = trackContainer.style.display = vbContainer.style.display = 'none';
-    winielaContainer.style.display = betnowContainer.style.display = 'none';
+    winielaContainer.style.display = betnowContainer.style.display = slipContainer.style.display = 'none';
   }
 
+  if (activeDate === 'SLIP') {
+    hideAll(); slipContainer.style.display = '';
+    renderSlipView(); return;
+  }
   if (activeDate === 'BETNOW') {
     hideAll(); betnowContainer.style.display = '';
     renderBetNowView(); return;
@@ -3057,7 +3132,434 @@ function renderReliabilityDiagram(picks) {
 const _sortEl = document.getElementById('sort-select');
 if (_sortEl && sortMode) _sortEl.value = sortMode;
 _sortEl.addEventListener('change', () => { sortMode = _sortEl.value; render(); });
+
+// ═══════════════════════════════════════════════════════════
+// BANKROLL & SLIP SYSTEM — v5.0
+// ═══════════════════════════════════════════════════════════
+const _BRL_KEY  = 'bwg_bankroll';
+const _SLIP_KEY = 'bwg_slip';
+const _HIST_KEY = 'bwg_history';
+let _slipTab = 'active'; // 'active' | 'history' | 'combined'
+
+function loadBankroll() { try { return JSON.parse(localStorage.getItem(_BRL_KEY)); } catch { return null; } }
+function saveBankroll(b) { try { localStorage.setItem(_BRL_KEY, JSON.stringify(b)); } catch {} }
+function loadSlip()     { try { return JSON.parse(localStorage.getItem(_SLIP_KEY)) || []; } catch { return []; } }
+function saveSlip(s)    { try { localStorage.setItem(_SLIP_KEY, JSON.stringify(s)); } catch {} }
+function loadHistory()  { try { return JSON.parse(localStorage.getItem(_HIST_KEY)) || []; } catch { return []; } }
+function saveHistory(h) { try { localStorage.setItem(_HIST_KEY, JSON.stringify(h)); } catch {} }
+
+function confirmBankroll() {
+  const val = parseFloat(document.getElementById('bankroll-init-input').value);
+  if (!val || val <= 0) return;
+  saveBankroll({ initial: val, current: val, setAt: new Date().toISOString() });
+  document.getElementById('bankroll-modal').style.display = 'none';
+  settleBets();
+  if (activeDate === 'SLIP') renderSlipView();
+  buildSidebar();
+}
+
+function resetBankroll() {
+  if (!confirm('¿Resetear bankroll y borrar historial? No se puede deshacer.')) return;
+  localStorage.removeItem(_BRL_KEY);
+  localStorage.removeItem(_HIST_KEY);
+  saveSlip([]);
+  document.getElementById('bankroll-modal').style.display = 'flex';
+}
+
+function _outcomeLabel(o) {
+  return {home:'Local',draw:'Empate',away:'Visitante',over25:'Over 2.5',btts:'BTTS'}[o] || o;
+}
+function _outcomeColor(o) {
+  return {home:'var(--home)',draw:'var(--draw)',away:'var(--away)',over25:'var(--accent-teal)',btts:'var(--accent-gold)'}[o] || 'var(--muted)';
+}
+
+// ── Auto-settlement from results.js ──
+function resolveOutcome(outcome, res) {
+  if (outcome === 'home')   return res.result === 'H';
+  if (outcome === 'draw')   return res.result === 'D';
+  if (outcome === 'away')   return res.result === 'A';
+  if (outcome === 'over25') return !!res.over25;
+  if (outcome === 'btts')   return !!res.btts;
+  return false;
+}
+
+function settleBets() {
+  if (!window.RESOLVED_RESULTS || !Object.keys(RESOLVED_RESULTS).length) return;
+  const history  = loadHistory();
+  const bankroll = loadBankroll();
+  if (!bankroll || !history.length) return;
+  let changed = false;
+
+  history.forEach(bet => {
+    if (bet.settled) return;
+    if (bet.type === 'simple') {
+      const key = `${bet.homeName}|${bet.awayName}|${bet.matchDate}`;
+      const res = RESOLVED_RESULTS[key];
+      if (!res) return;
+      const won = resolveOutcome(bet.outcome, res);
+      bet.result = won ? 'won' : 'lost';
+      bet.pnl    = won ? +((bet.oddsUser - 1) * bet.stake).toFixed(2) : -bet.stake;
+      bet.settled = true; bet.settledAt = new Date().toISOString();
+      changed = true;
+    } else if (bet.type === 'combinada') {
+      const allResolved = bet.legs.every(leg => !!RESOLVED_RESULTS[`${leg.homeName}|${leg.awayName}|${leg.matchDate}`]);
+      if (!allResolved) return;
+      const allWon = bet.legs.every(leg => resolveOutcome(leg.outcome, RESOLVED_RESULTS[`${leg.homeName}|${leg.awayName}|${leg.matchDate}`]));
+      bet.result = allWon ? 'won' : 'lost';
+      bet.pnl    = allWon ? +((bet.combinedOdds - 1) * bet.stake).toFixed(2) : -bet.stake;
+      bet.settled = true; bet.settledAt = new Date().toISOString();
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    saveHistory(history);
+    const totalPnl = history.filter(b => b.settled).reduce((s, b) => s + b.pnl, 0);
+    bankroll.current = +(bankroll.initial + totalPnl).toFixed(2);
+    saveBankroll(bankroll);
+  }
+}
+
+// ── Add to slip (called from match cards / modal) ──
+function addToSlip(homeName, awayName, league, matchDate, outcome, suggestedOdds, kellyStake) {
+  if (!loadBankroll()) { document.getElementById('bankroll-modal').style.display = 'flex'; return; }
+  const slip = loadSlip();
+  if (slip.some(s => s.homeName === homeName && s.awayName === awayName && s.outcome === outcome)) {
+    showToast && showToast('Ya está en el slip'); return;
+  }
+  const brl = loadBankroll();
+  const defaultStake = kellyStake || +(brl.current * 0.02).toFixed(2);
+  slip.push({ id: Date.now()+'', homeName, awayName, league, matchDate,
+    outcome, oddsUser: suggestedOdds || 2.0, stake: defaultStake,
+    kellyStake: kellyStake || null, addedAt: new Date().toISOString() });
+  saveSlip(slip);
+  buildSidebar();
+  showToast && showToast('Pick añadido al slip');
+}
+
+function removeFromSlip(id) {
+  saveSlip(loadSlip().filter(s => s.id !== id));
+  if (activeDate === 'SLIP') renderSlipView(); else buildSidebar();
+}
+
+function placeBets() {
+  const slip = loadSlip();
+  if (!slip.length) return;
+  const brl = loadBankroll();
+  const hist = loadHistory();
+  const total = slip.reduce((s, b) => s + parseFloat(b.stake||0), 0);
+  if (total > brl.current) { alert('Stake total supera el bankroll disponible.'); return; }
+  slip.forEach(b => hist.push({ ...b, type:'simple', placedAt:new Date().toISOString(), settled:false, result:null, pnl:0 }));
+  brl.current = +(brl.current - total).toFixed(2);
+  saveBankroll(brl); saveHistory(hist); saveSlip([]);
+  settleBets(); buildSidebar(); renderSlipView();
+}
+
+function placeCombinada() {
+  const slip = loadSlip();
+  if (slip.length < 2) { alert('Añade al menos 2 picks para una combinada.'); return; }
+  const brl   = loadBankroll();
+  const stake = parseFloat(document.getElementById('comb-stake')?.value || 10);
+  if (stake > brl.current) { alert('Stake supera el bankroll.'); return; }
+  const combinedOdds = +slip.reduce((p, b) => p * parseFloat(b.oddsUser||1), 1).toFixed(3);
+  const hist = loadHistory();
+  hist.push({
+    id: Date.now()+'', type:'combinada',
+    legs: slip.map(b => ({ homeName:b.homeName, awayName:b.awayName,
+      league:b.league, matchDate:b.matchDate, outcome:b.outcome, oddsUser:b.oddsUser })),
+    combinedOdds, stake, placedAt:new Date().toISOString(), settled:false, result:null, pnl:0
+  });
+  brl.current = +(brl.current - stake).toFixed(2);
+  saveBankroll(brl); saveHistory(hist); saveSlip([]);
+  settleBets(); buildSidebar(); renderSlipView();
+}
+
+// ── Ollama risk analysis (direct browser → localhost:11434) ──
+async function analyzeRiskWithOllama() {
+  const slip = loadSlip(); const brl = loadBankroll();
+  const btn  = document.getElementById('ollama-risk-btn');
+  const box  = document.getElementById('ollama-risk-box');
+  if (!slip.length) { if(box) box.innerHTML='<span style="color:var(--muted)">Añade picks primero.</span>'; return; }
+  btn.disabled = true; btn.textContent = '⏳ Analizando...';
+  if(box) box.innerHTML = '<span style="color:var(--muted)">Consultando Qwen3...</span>';
+
+  const total    = slip.reduce((s,b) => s + parseFloat(b.stake||0), 0);
+  const exposure = brl ? (total/brl.current*100).toFixed(1) : '?';
+  const prompt   = `Eres un gestor de riesgo de apuestas. Analiza este slip en español.
+
+BANKROLL: €${brl?.current?.toFixed(2)||'?'} (inicial €${brl?.initial?.toFixed(2)||'?'})
+EXPOSICIÓN: €${total.toFixed(2)} (${exposure}% del bankroll)
+
+PICKS:
+${slip.map((b,i) => {
+  const kw = b.kellyStake && parseFloat(b.stake) > b.kellyStake*1.5 ? ' [SUPERA KELLY x'+((b.stake/b.kellyStake).toFixed(1))+']' : '';
+  return `${i+1}. ${b.homeName} vs ${b.awayName} [${b.league}] | ${_outcomeLabel(b.outcome)} @${b.oddsUser} | Stake €${b.stake}${kw}`;
+}).join('\n')}
+
+Responde SOLO con:
+RIESGO: (Bajo/Medio/Alto/Muy Alto)
+PROBLEMAS: (lista máx 3, o "Ninguno")
+CONSEJO: (1-2 frases concretas)`;
+
+  try {
+    const r = await fetch('http://localhost:11434/api/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      signal: AbortSignal.timeout(60000),
+      body: JSON.stringify({ model:'qwen3.5:9b', messages:[{role:'user',content:prompt}],
+        stream:false, think:false, options:{temperature:0.1} })
+    });
+    const d = await r.json();
+    const txt = (d.message?.content||'Sin respuesta').replace(/\n/g,'<br>');
+    if(box) box.innerHTML = `<div style="line-height:1.7">${txt}</div>`;
+  } catch(e) {
+    if(box) box.innerHTML = '<span style="color:var(--accent-orange)">Ollama no disponible en localhost:11434</span>';
+  } finally { btn.disabled=false; btn.textContent='🤖 Analizar riesgo'; }
+}
+
+// ── Main SLIP view renderer ──
+function renderSlipView() {
+  settleBets();
+  const container = document.getElementById('slip-container');
+  const brl       = loadBankroll();
+  const slip      = loadSlip();
+  const hist      = loadHistory();
+  const settled   = hist.filter(b => b.settled);
+  const pending   = hist.filter(b => !b.settled);
+  const totalPnl  = settled.reduce((s,b) => s+b.pnl, 0);
+  const roi       = brl ? (totalPnl/brl.initial*100) : 0;
+  const inPlay    = pending.reduce((s,b) => s+(b.stake||0), 0)
+                  + slip.reduce((s,b) => s+parseFloat(b.stake||0), 0);
+
+  const pnlColor  = totalPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-orange)';
+  const roiStr    = (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%';
+
+  // ── Header ──
+  const header = `
+  <div class="slip-header">
+    <div class="slip-bankroll-pill">
+      <span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px">Bankroll</span>
+      <span style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800">€${brl ? brl.current.toFixed(2) : '—'}</span>
+    </div>
+    <div class="slip-bankroll-pill">
+      <span style="color:var(--muted);font-size:11px">P&L</span>
+      <span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:${pnlColor}">${totalPnl>=0?'+':''}€${totalPnl.toFixed(2)}</span>
+      <span style="font-size:12px;color:${pnlColor}">${roiStr}</span>
+    </div>
+    <div class="slip-bankroll-pill">
+      <span style="color:var(--muted);font-size:11px">En juego</span>
+      <span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:var(--accent-yellow)">€${inPlay.toFixed(2)}</span>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button onclick="resetBankroll()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 12px;color:var(--muted);cursor:pointer;font-size:12px">Resetear</button>
+      ${!brl ? `<button onclick="document.getElementById('bankroll-modal').style.display='flex'" style="background:var(--accent-green);border:none;border-radius:6px;padding:6px 14px;color:#000;cursor:pointer;font-size:12px;font-weight:700">Configurar bankroll</button>` : ''}
+    </div>
+  </div>`;
+
+  // ── Tabs ──
+  const tabs = `
+  <div class="slip-tabs">
+    <div class="slip-tab ${_slipTab==='active'?'active':''}" onclick="_slipTab='active';renderSlipView()">
+      Slip activo ${slip.length ? `<span style="background:var(--accent-teal);color:#000;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:4px">${slip.length}</span>` : ''}
+    </div>
+    <div class="slip-tab ${_slipTab==='history'?'active':''}" onclick="_slipTab='history';renderSlipView()">
+      Historial ${hist.length ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:10px;margin-left:4px">${hist.length}</span>` : ''}
+    </div>
+    <div class="slip-tab ${_slipTab==='combined'?'active':''}" onclick="_slipTab='combined';renderSlipView()">
+      Combinada ${slip.length>=2?`<span style="background:var(--accent-gold);color:#000;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:4px">${slip.length}</span>`:''}
+    </div>
+  </div>`;
+
+  let body = '';
+
+  // ── TAB: Slip activo ──
+  if (_slipTab === 'active') {
+    if (!slip.length) {
+      body = `<div class="slip-body" style="text-align:center;padding:60px 24px">
+        <div style="font-size:36px;margin-bottom:12px">🎯</div>
+        <div style="color:var(--muted);font-size:14px">Tu slip está vacío.<br>Añade picks desde las predicciones del día.</div>
+        <button onclick="activeDate=DATES[0]||'ALL';render()" style="margin-top:20px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 22px;color:var(--text);cursor:pointer;font-size:14px">Ver predicciones</button>
+      </div>`;
+    } else {
+      const total  = slip.reduce((s,b) => s+parseFloat(b.stake||0), 0);
+      const retPot = slip.reduce((s,b) => s+parseFloat(b.stake||0)*parseFloat(b.oddsUser||1), 0);
+      const exposurePct = brl ? (total/brl.current*100) : 0;
+      const expColor = exposurePct > 20 ? 'var(--accent-orange)' : exposurePct > 10 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+
+      const rows = slip.map(b => {
+        const kelly_ratio = b.kellyStake ? (parseFloat(b.stake)/b.kellyStake) : null;
+        const warnHtml = kelly_ratio && kelly_ratio > 1.5
+          ? `<div class="slip-warn">⚠️ Stake ${kelly_ratio.toFixed(1)}× por encima del Kelly (€${b.kellyStake?.toFixed(2)})</div>`
+          : kelly_ratio
+            ? `<div class="slip-ok">✓ Dentro del Kelly</div>`
+            : '';
+        return `
+        <div class="slip-row">
+          <div class="slip-row-info">
+            <div class="slip-row-match">${b.homeName} vs ${b.awayName}</div>
+            <div class="slip-row-meta">
+              <span class="league-badge badge-${b.league}">${b.league}</span>
+              <span style="margin-left:6px;color:${_outcomeColor(b.outcome)};font-weight:600">${_outcomeLabel(b.outcome)}</span>
+              <span style="margin-left:6px">${b.matchDate}</span>
+            </div>
+            ${warnHtml}
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <div>
+              <div style="color:var(--muted);font-size:10px;text-align:center">Cuota</div>
+              <input class="slip-odds-input" type="number" min="1.01" step="0.01"
+                value="${b.oddsUser}"
+                onchange="(()=>{const s=loadSlip();const i=s.findIndex(x=>x.id==='${b.id}');if(i>=0){s[i].oddsUser=parseFloat(this.value)||2;saveSlip(s);}renderSlipView()})()">
+            </div>
+            <div>
+              <div style="color:var(--muted);font-size:10px;text-align:center">Stake €</div>
+              <input class="slip-stake-input" type="number" min="0.5" step="0.5"
+                value="${b.stake}"
+                onchange="(()=>{const s=loadSlip();const i=s.findIndex(x=>x.id==='${b.id}');if(i>=0){s[i].stake=parseFloat(this.value)||1;saveSlip(s);}renderSlipView()})()">
+            </div>
+            <div style="text-align:right;min-width:60px">
+              <div style="color:var(--muted);font-size:10px">Retorno</div>
+              <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--accent-green)">€${(parseFloat(b.stake||0)*parseFloat(b.oddsUser||1)).toFixed(2)}</div>
+            </div>
+            <button class="slip-remove" onclick="removeFromSlip('${b.id}')">✕</button>
+          </div>
+        </div>`;
+      }).join('');
+
+      body = `
+      <div class="slip-body">${rows}</div>
+      <div style="padding:12px 24px;background:var(--surface2);border-radius:10px;margin:12px 24px;display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+        <div><span style="color:var(--muted);font-size:11px">Exposición</span><br>
+          <span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:${expColor}">€${total.toFixed(2)} (${exposurePct.toFixed(1)}%)</span>
+        </div>
+        <div><span style="color:var(--muted);font-size:11px">Retorno potencial</span><br>
+          <span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:var(--accent-green)">€${retPot.toFixed(2)}</span>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+          <button id="ollama-risk-btn" onclick="analyzeRiskWithOllama()"
+            style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 18px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">
+            🤖 Analizar riesgo
+          </button>
+          <button class="slip-cta" onclick="placeBets()" ${!brl?'disabled':''}>✅ Registrar bets</button>
+        </div>
+      </div>
+      <div id="ollama-risk-box" class="ollama-box" style="display:${document.getElementById('ollama-risk-box')?.innerHTML?'block':'none'};margin:0 24px 16px"></div>`;
+    }
+  }
+
+  // ── TAB: Historial ──
+  else if (_slipTab === 'history') {
+    if (!hist.length) {
+      body = `<div class="slip-body" style="text-align:center;padding:60px 24px">
+        <div style="font-size:36px;margin-bottom:12px">📋</div>
+        <div style="color:var(--muted)">No hay bets registrados todavía.</div>
+      </div>`;
+    } else {
+      // Bankroll curve (mini sparkline via divs)
+      let runningBrl = brl ? brl.initial : 0;
+      const curve = [];
+      [...hist].sort((a,b) => (a.placedAt||'') < (b.placedAt||'') ? -1 : 1).forEach(b => {
+        if (b.settled) { runningBrl += b.pnl; curve.push(runningBrl); }
+      });
+      const minBrl = Math.min(...curve, brl?.initial || 0);
+      const maxBrl = Math.max(...curve, brl?.initial || 0);
+      const range  = maxBrl - minBrl || 1;
+      const sparkline = curve.length > 1 ? `
+        <div style="margin:0 24px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 16px">
+          <div style="color:var(--muted);font-size:11px;margin-bottom:8px">CURVA DE BANKROLL</div>
+          <div style="display:flex;align-items:flex-end;gap:3px;height:40px">
+            ${curve.map(v => {
+              const h = Math.max(4, Math.round(((v-minBrl)/range)*36));
+              const c = v >= (brl?.initial||0) ? 'var(--accent-green)' : 'var(--accent-orange)';
+              return `<div style="flex:1;height:${h}px;background:${c};border-radius:2px;opacity:.8"></div>`;
+            }).join('')}
+          </div>
+        </div>` : '';
+
+      const histRows = [...hist].sort((a,b) => (b.placedAt||'') > (a.placedAt||'') ? 1 : -1).map(b => {
+        const badgeHtml = b.settled
+          ? (b.result==='won'
+            ? `<span class="hist-badge-won">GANADO +€${b.pnl.toFixed(2)}</span>`
+            : `<span class="hist-badge-lost">PERDIDO -€${Math.abs(b.pnl).toFixed(2)}</span>`)
+          : `<span class="hist-badge-pending">PENDIENTE</span>`;
+        const desc = b.type === 'combinada'
+          ? `Combinada ${b.legs?.length} piernas @${b.combinedOdds}`
+          : `${b.homeName} vs ${b.awayName} · ${_outcomeLabel(b.outcome)} @${b.oddsUser}`;
+        return `
+        <div class="hist-row">
+          <div style="flex:1;min-width:180px">
+            <div style="font-size:13px;font-weight:600">${desc}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">${(b.placedAt||'').slice(0,10)} · ${b.league||''} · Stake €${b.stake}</div>
+          </div>
+          ${badgeHtml}
+        </div>`;
+      }).join('');
+
+      body = `${sparkline}<div class="slip-body" style="padding-top:4px">${histRows}</div>`;
+    }
+  }
+
+  // ── TAB: Combinada ──
+  else if (_slipTab === 'combined') {
+    if (slip.length < 2) {
+      body = `<div class="slip-body" style="text-align:center;padding:60px 24px">
+        <div style="font-size:36px;margin-bottom:12px">🔗</div>
+        <div style="color:var(--muted)">Añade al menos 2 picks al slip para construir una combinada.</div>
+      </div>`;
+    } else {
+      const combinedOdds = +slip.reduce((p,b) => p*parseFloat(b.oddsUser||1), 1).toFixed(3);
+      const legs = slip.map((b,i) => `
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+          <span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:var(--muted)">${i+1}</span>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600">${b.homeName} vs ${b.awayName}</div>
+            <div style="font-size:11px;color:${_outcomeColor(b.outcome)};margin-top:2px">${_outcomeLabel(b.outcome)}</div>
+          </div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700">@${b.oddsUser}</div>
+        </div>`).join('');
+      body = `
+      <div class="slip-body">
+        ${legs}
+        <div style="margin-top:20px;background:var(--surface2);border-radius:10px;padding:16px;display:flex;flex-wrap:wrap;gap:20px;align-items:center">
+          <div>
+            <div style="color:var(--muted);font-size:11px">Cuota combinada</div>
+            <div style="font-family:'Barlow Condensed',sans-serif;font-size:32px;font-weight:800;color:var(--accent-gold)">@${combinedOdds}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:var(--muted);font-size:13px">Stake €</span>
+            <input id="comb-stake" type="number" min="1" step="1" value="10" class="slip-stake-input" style="width:90px"
+              oninput="document.getElementById('comb-return').textContent='€'+(parseFloat(this.value||0)*${combinedOdds}).toFixed(2)">
+          </div>
+          <div>
+            <div style="color:var(--muted);font-size:11px">Retorno potencial</div>
+            <div id="comb-return" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:700;color:var(--accent-green)">€${(10*combinedOdds).toFixed(2)}</div>
+          </div>
+          <button class="slip-cta" onclick="placeCombinada()" ${!brl?'disabled':''} style="margin-left:auto">✅ Registrar combinada</button>
+        </div>
+      </div>`;
+    }
+  }
+
+  container.innerHTML = header + tabs + `<div style="border-bottom:1px solid var(--border)"></div>` + body;
+
+  // Restore ollama box if it had content
+  if (_slipTab === 'active' && slip.length) {
+    const box = document.getElementById('ollama-risk-box');
+    if (box) box.style.display = 'none'; // reset each render
+  }
+}
+
+// ── On page load: init bankroll + settle pending bets ──
+function initBankrollSystem() {
+  const brl = loadBankroll();
+  if (!brl) {
+    document.getElementById('bankroll-modal').style.display = 'flex';
+  } else {
+    settleBets();
+  }
+}
+
 render();
+initBankrollSystem();
 </script>
 </body>
 </html>
