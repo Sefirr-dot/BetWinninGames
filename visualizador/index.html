@@ -34,6 +34,26 @@
   --accent-teal: #14b8a6;
 }
 
+/* ── AUTOPILOT ── */
+.ap-radio-btn{background:var(--surface2);border:2px solid var(--border);border-radius:8px;padding:10px 6px;text-align:center;transition:.15s;user-select:none}
+input[type=radio]:checked + .ap-radio-btn,input[type=checkbox]:checked + .ap-check-btn{border-color:var(--accent-teal);background:rgba(20,184,166,.15);color:var(--accent-teal)}
+.ap-check-btn{padding:6px 14px;border:2px solid var(--border);border-radius:20px;font-size:12px;font-weight:700;transition:.15s;user-select:none}
+.ap-pick-card{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:10px;display:flex;align-items:center;gap:14px;transition:.2s}
+.ap-pick-card:hover{border-color:var(--accent-teal)}
+.ap-pick-num{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:800;color:var(--muted);min-width:28px;text-align:center}
+.ap-pick-info{flex:1}
+.ap-pick-match{font-size:14px;font-weight:700}
+.ap-pick-meta{font-size:11px;color:var(--muted);margin-top:3px}
+.ap-pick-right{text-align:right}
+.ap-pick-stake{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:var(--accent-green)}
+.ap-pick-ev{font-size:11px;color:var(--accent-teal);margin-top:2px}
+.ap-summary-bar{display:flex;flex-wrap:wrap;gap:10px;padding:14px 20px;background:var(--surface2);border-radius:10px;margin-bottom:16px}
+.ap-stat{text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 16px;min-width:80px}
+.ap-stat-val{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800}
+.ap-stat-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+.ap-corr-warn{background:rgba(249,115,22,.1);border:1px solid rgba(249,115,22,.3);border-radius:8px;padding:8px 14px;font-size:12px;color:var(--accent-orange);margin-bottom:12px}
+.ap-empty{text-align:center;padding:60px 24px;color:var(--muted)}
+
 /* ── SLIP / BANKROLL ── */
 .slip-header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:20px 24px;border-bottom:1px solid var(--border);background:var(--surface)}
 .slip-bankroll-pill{display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px 16px}
@@ -1329,10 +1349,66 @@ select.sort-select:focus { border-color: #3d6090; }
 
   <!-- SLIP / BANKROLL View -->
   <div id="slip-container" style="display:none"></div>
+
+  <!-- AUTOPILOT View -->
+  <div id="autopilot-container" style="display:none"></div>
 </div>
 
 </div><!-- /main-wrap -->
 </div><!-- /app-layout -->
+
+<!-- Autopilot Profile Wizard -->
+<div id="autopilot-wizard" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:36px;max-width:460px;width:92%">
+    <div style="font-size:32px;text-align:center;margin-bottom:12px">🤖</div>
+    <div id="ap-wiz-title" style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;text-align:center;margin-bottom:6px">Autopilot Setup</div>
+    <div id="ap-wiz-sub" style="color:var(--muted);font-size:13px;text-align:center;margin-bottom:28px">Configure your betting profile once. Change it anytime.</div>
+
+    <!-- Risk level -->
+    <div style="margin-bottom:20px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px" id="ap-lbl-risk">Risk level</div>
+      <div style="display:flex;gap:8px">
+        ${['conservative','balanced','aggressive'].map(r => `
+        <label style="flex:1;cursor:pointer">
+          <input type="radio" name="ap-risk" value="${r}" style="display:none" ${r==='balanced'?'checked':''}>
+          <div class="ap-radio-btn" data-val="${r}">
+            <div style="font-size:16px">${r==='conservative'?'🛡️':r==='balanced'?'⚖️':'🚀'}</div>
+            <div style="font-size:11px;font-weight:600;margin-top:4px;text-transform:capitalize" id="ap-risk-${r}">${r}</div>
+          </div>
+        </label>`).join('')}
+      </div>
+    </div>
+
+    <!-- Max bets per day -->
+    <div style="margin-bottom:20px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px" id="ap-lbl-maxbets">Max bets per day</div>
+      <div style="display:flex;gap:8px">
+        ${[1,2,3,4,5].map(n => `
+        <label style="flex:1;cursor:pointer">
+          <input type="radio" name="ap-maxbets" value="${n}" style="display:none" ${n===3?'checked':''}>
+          <div class="ap-radio-btn" data-val="${n}" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800">${n}</div>
+        </label>`).join('')}
+      </div>
+    </div>
+
+    <!-- Leagues -->
+    <div style="margin-bottom:20px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px" id="ap-lbl-leagues">Leagues</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['PL','PD','BL1','FL1'].map(lg => `
+        <label style="cursor:pointer">
+          <input type="checkbox" class="ap-league-cb" value="${lg}" checked style="display:none">
+          <div class="ap-check-btn league-badge badge-${lg}">${lg}</div>
+        </label>`).join('')}
+      </div>
+    </div>
+
+    <button onclick="saveAutopilotProfile()" id="ap-wiz-btn"
+      style="background:var(--accent-green);border:none;border-radius:10px;padding:14px;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:#000;cursor:pointer;width:100%;margin-top:8px">
+      Start Autopilot
+    </button>
+  </div>
+</div>
 
 <!-- Bankroll Init Modal -->
 <div id="bankroll-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center">
@@ -1372,6 +1448,28 @@ select.sort-select:focus { border-color: #3d6090; }
 // ── LANGUAGE ──
 const LANG = navigator.language.toLowerCase().startsWith('es') ? 'es' : 'en';
 const T = {
+  // Autopilot
+  nav_auto:      { es: 'Autopilot',         en: 'Autopilot' },
+  auto_title:    { es: 'Plan del fin de semana', en: "This weekend's plan" },
+  auto_sub:      { es: 'picks seleccionados automáticamente · basado en tu perfil y el modelo', en: 'picks auto-selected · based on your profile and model' },
+  auto_no_picks: { es: 'Sin picks 5★ que cumplan tu perfil hoy.\nPrueba a reducir los filtros en ajustes.', en: 'No 5★ picks matching your profile today.\nTry relaxing filters in settings.' },
+  auto_accept:   { es: '✅ Añadir todo al slip', en: '✅ Add all to slip' },
+  auto_settings: { es: '⚙️ Ajustar perfil',     en: '⚙️ Adjust profile' },
+  auto_exposure: { es: 'Exposición',   en: 'Exposure' },
+  auto_ev_total: { es: 'EV esperado',  en: 'Expected EV' },
+  auto_bets:     { es: 'Apuestas',     en: 'Bets' },
+  auto_corr:     { es: '⚠️ Correlación detectada: múltiples picks en la misma liga — stakes reducidos.', en: '⚠️ Correlation detected: multiple picks in same league — stakes reduced.' },
+  auto_risk_con: { es: 'Conservador',  en: 'Conservative' },
+  auto_risk_bal: { es: 'Equilibrado',  en: 'Balanced' },
+  auto_risk_agg: { es: 'Agresivo',     en: 'Aggressive' },
+  auto_wiz_title:{ es: 'Configura el Autopilot', en: 'Autopilot Setup' },
+  auto_wiz_sub:  { es: 'Configura tu perfil una vez. Cámbialo cuando quieras.', en: 'Configure your profile once. Change it anytime.' },
+  auto_wiz_risk: { es: 'Nivel de riesgo', en: 'Risk level' },
+  auto_wiz_max:  { es: 'Máx. apuestas por día', en: 'Max bets per day' },
+  auto_wiz_lg:   { es: 'Ligas',        en: 'Leagues' },
+  auto_wiz_btn:  { es: 'Iniciar Autopilot', en: 'Start Autopilot' },
+  lbl_stake_rec: { es: 'Stake recomendado', en: 'Recommended stake' },
+  lbl_ev:        { es: 'EV',           en: 'EV' },
   // Sidebar nav
   nav_bankroll:  { es: 'Mi Bankroll',   en: 'My Bankroll' },
   nav_betnow:    { es: 'Bet Now',       en: 'Bet Now' },
@@ -1472,7 +1570,7 @@ function saveState() {
   } catch {}
 }
 const _saved = _loadState();
-let activeDate   = (DATES.includes(_saved.activeDate) || ['ALL','BEST','VALUE','TRACK','BACK','WIN','BETNOW','SLIP'].includes(_saved.activeDate))
+let activeDate   = (DATES.includes(_saved.activeDate) || ['ALL','BEST','VALUE','TRACK','BACK','WIN','BETNOW','SLIP','AUTO'].includes(_saved.activeDate))
                    ? _saved.activeDate : (DATES[0] || 'ALL');
 let activeLeague = _saved.activeLeague || "ALL";
 let sortMode     = _saved.sortMode     || "stars";
@@ -1574,6 +1672,7 @@ function buildSidebar() {
   const brl   = loadBankroll();
   const slipBadge = nSlip > 0 ? nSlip : (brl ? '€'+brl.current.toFixed(0) : '—');
   const items = [
+    { id: 'AUTO',  icon: '🤖', label: _t('nav_auto'),     badge: '✨',               cls: 'sb-active-track' },
     { id: 'SLIP',  icon: '🎯', label: _t('nav_bankroll'), badge: slipBadge,          cls: 'sb-active-track' },
     { id: 'BETNOW',icon: '💰', label: _t('nav_betnow'),   badge: nBetNow,            cls: 'sb-active-value' },
     { id: 'BEST',  icon: '🏆', label: _t('nav_top'),      badge: bestBets.length,    cls: 'sb-active-best'  },
@@ -1886,13 +1985,19 @@ function render() {
   const winielaContainer  = document.getElementById('winiela-container');
   const betnowContainer   = document.getElementById('betnow-container');
   const slipContainer     = document.getElementById('slip-container');
+  const autopilotContainer = document.getElementById('autopilot-container');
 
   function hideAll() {
     controls.style.display = summaryEl.style.display = grid.style.display = 'none';
     bbContainer.style.display = trackContainer.style.display = vbContainer.style.display = 'none';
     winielaContainer.style.display = betnowContainer.style.display = slipContainer.style.display = 'none';
+    autopilotContainer.style.display = 'none';
   }
 
+  if (activeDate === 'AUTO') {
+    hideAll(); autopilotContainer.style.display = '';
+    renderAutopilotView(); return;
+  }
   if (activeDate === 'SLIP') {
     hideAll(); slipContainer.style.display = '';
     renderSlipView(); return;
@@ -3289,6 +3394,209 @@ function renderReliabilityDiagram(picks) {
 const _sortEl = document.getElementById('sort-select');
 if (_sortEl && sortMode) _sortEl.value = sortMode;
 _sortEl.addEventListener('change', () => { sortMode = _sortEl.value; render(); });
+
+// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// AUTOPILOT SYSTEM — v6.0
+// ═══════════════════════════════════════════════════════════
+const _PROFILE_KEY = 'bwg_profile';
+
+function loadProfile() {
+  try { return JSON.parse(localStorage.getItem(_PROFILE_KEY)); } catch { return null; }
+}
+function saveProfile(p) {
+  try { localStorage.setItem(_PROFILE_KEY, JSON.stringify(p)); } catch {}
+}
+
+function saveAutopilotProfile() {
+  const risk    = document.querySelector('input[name="ap-risk"]:checked')?.value || 'balanced';
+  const maxBets = parseInt(document.querySelector('input[name="ap-maxbets"]:checked')?.value || '3');
+  const leagues = [...document.querySelectorAll('.ap-league-cb:checked')].map(el => el.value);
+  if (!leagues.length) { alert(_t('auto_wiz_lg') + '?'); return; }
+  saveProfile({ riskLevel: risk, maxBetsPerDay: maxBets, leagues,
+    markets: ['1x2','over25','btts'], minOdds: 1.40, minStars: 5, maxExposurePct: 10 });
+  document.getElementById('autopilot-wizard').style.display = 'none';
+  renderAutopilotView();
+}
+
+// ── Selection engine ──
+function selectAutopilotBets() {
+  const profile  = loadProfile();
+  const bankroll = loadBankroll();
+  if (!profile || !bankroll) return [];
+
+  const kellyMult = { conservative: 0.5, balanced: 1.0, aggressive: 1.5 }[profile.riskLevel] || 1.0;
+  const leagueRoi = (window.TRACKER_METRICS?.per_league) || {};
+
+  const candidates = [];
+  ALL_MATCHES.forEach(m => {
+    if (!m.valueBets?.length) return;
+    if (m.stars < profile.minStars) return;
+    if (!profile.leagues.includes(m.league)) return;
+
+    m.valueBets.forEach(vb => {
+      if (vb.bkOdds < profile.minOdds) return;
+      const market = vb.outcome === 'over25' ? 'over25' : vb.outcome === 'btts' ? 'btts' : '1x2';
+      if (!profile.markets.includes(market)) return;
+
+      const lgData = leagueRoi[m.league];
+      const lgRoi  = lgData?.roi ?? 0;
+      const lgMult = Math.max(0.5, Math.min(2.0, 1.0 + lgRoi));
+      const score  = (vb.edge / 100) * (vb.kelly / 100) * lgMult;
+      candidates.push({ m, vb, score, league: m.league, date: m.date });
+    });
+  });
+
+  candidates.sort((a, b) => b.score - a.score);
+  const seen = new Set();
+  const picked = [];
+  for (const c of candidates) {
+    const key = `${c.date}|${c.m.home}|${c.m.away}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picked.push(c);
+    if (picked.length >= profile.maxBetsPerDay) break;
+  }
+
+  const leagueCount = {};
+  picked.forEach(c => { const k = `${c.league}|${c.date}`; leagueCount[k] = (leagueCount[k]||0)+1; });
+
+  const maxPerBet = bankroll.current * (profile.maxExposurePct / 100) / Math.max(picked.length, 1);
+  return picked.map(c => {
+    const k       = `${c.league}|${c.date}`;
+    const corrPen = leagueCount[k] >= 3 ? 0.65 : leagueCount[k] === 2 ? 0.80 : 1.0;
+    const stake   = +Math.min((c.vb.kelly/100) * bankroll.current * kellyMult * corrPen, maxPerBet).toFixed(2);
+    const ev      = +(stake * c.vb.edge / 100).toFixed(2);
+    return { ...c, stake, ev, correlated: leagueCount[k] > 1 };
+  });
+}
+
+// ── Render autopilot view ──
+function renderAutopilotView() {
+  const container = document.getElementById('autopilot-container');
+  const profile   = loadProfile();
+  const bankroll  = loadBankroll();
+
+  if (!profile) {
+    applyWizardI18n();
+    document.getElementById('autopilot-wizard').style.display = 'flex';
+    container.innerHTML = '';
+    return;
+  }
+  if (!bankroll) {
+    document.getElementById('bankroll-modal').style.display = 'flex';
+    return;
+  }
+
+  const picks       = selectAutopilotBets();
+  const totalStake  = picks.reduce((s,p) => s+p.stake, 0);
+  const totalEV     = picks.reduce((s,p) => s+p.ev, 0);
+  const exposurePct = bankroll.current > 0 ? (totalStake/bankroll.current*100) : 0;
+  const hasCorr     = picks.some(p => p.correlated);
+  const riskLabel   = {conservative:_t('auto_risk_con'),balanced:_t('auto_risk_bal'),aggressive:_t('auto_risk_agg')}[profile.riskLevel] || profile.riskLevel;
+  const _outLabel   = {home:_t('out_home'),draw:_t('out_draw'),away:_t('out_away'),over25:_t('out_over25'),btts:_t('out_btts')};
+
+  const header = `
+  <div style="padding:20px 24px 12px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800">🤖 Autopilot</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:2px">${picks.length} ${_t('auto_sub')}</div>
+      </div>
+      <button onclick="document.getElementById('autopilot-wizard').style.display='flex';applyWizardI18n()"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 14px;color:var(--text);cursor:pointer;font-size:13px">
+        ${_t('auto_settings')} · ${riskLabel}
+      </button>
+    </div>
+  </div>`;
+
+  const summaryBar = picks.length ? `
+  <div class="ap-summary-bar" style="margin:16px 24px 0">
+    ${[
+      [picks.length,         _t('auto_bets'),     'var(--accent-teal)'],
+      ['€'+totalStake.toFixed(2)+'<br><small style="font-size:10px">'+exposurePct.toFixed(1)+'%</small>', _t('auto_exposure'), 'var(--accent-yellow)'],
+      ['+€'+totalEV.toFixed(2), _t('auto_ev_total'), totalEV>=0?'var(--accent-green)':'var(--accent-orange)'],
+      ['€'+bankroll.current.toFixed(0), 'Bankroll', 'var(--text)'],
+    ].map(([v,l,c]) => `<div class="ap-stat"><div class="ap-stat-val" style="color:${c}">${v}</div><div class="ap-stat-lbl">${l}</div></div>`).join('')}
+  </div>` : '';
+
+  const corrWarn = hasCorr ? `<div class="ap-corr-warn" style="margin:12px 24px 0">${_t('auto_corr')}</div>` : '';
+
+  const pickCards = picks.length ? picks.map((p, i) => `
+    <div class="ap-pick-card" onclick="openModal(${ALL_MATCHES.indexOf(p.m)})" style="cursor:pointer;margin:0 24px">
+      <div class="ap-pick-num">${i+1}</div>
+      <div class="ap-pick-info">
+        <div class="ap-pick-match">${p.m.homeShort} vs ${p.m.awayShort}</div>
+        <div class="ap-pick-meta">
+          <span class="league-badge badge-${p.m.league}">${p.m.league}</span>
+          <span style="color:${_outcomeColor(p.vb.outcome)};font-weight:600;margin-left:6px">${_outLabel[p.vb.outcome]||p.vb.outcome}</span>
+          <span style="margin-left:6px">@${p.vb.bkOdds}</span>
+          <span style="margin-left:6px;color:var(--muted)">Edge ${p.vb.edge}%</span>
+          ${p.correlated?'<span style="color:var(--accent-orange);font-size:10px;margin-left:6px">⚡ corr</span>':''}
+        </div>
+        <div style="margin-top:6px;background:var(--surface);border-radius:4px;height:4px;overflow:hidden">
+          <div style="background:var(--accent-teal);height:100%;width:${Math.min(p.vb.edge*4,100)}%;border-radius:4px"></div>
+        </div>
+      </div>
+      <div class="ap-pick-right">
+        <div class="ap-pick-stake">€${p.stake}</div>
+        <div class="ap-pick-ev">EV +€${p.ev}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${'★'.repeat(p.m.stars)}</div>
+      </div>
+    </div>`).join('')
+  : `<div class="ap-empty"><div style="font-size:40px;margin-bottom:12px">🤖</div><div style="white-space:pre-line">${_t('auto_no_picks')}</div></div>`;
+
+  const footer = picks.length ? `
+  <div style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px;margin-top:8px">
+    <button onclick="autopilotAddAll()" class="slip-cta" style="flex:1">${_t('auto_accept')}</button>
+  </div>` : '';
+
+  container.innerHTML = header + summaryBar + corrWarn +
+    `<div style="padding:16px 0;display:flex;flex-direction:column;gap:10px">${pickCards}</div>` + footer;
+}
+
+function autopilotAddAll() {
+  const picks = selectAutopilotBets();
+  if (!picks.length) return;
+  const brl = loadBankroll();
+  if (!brl) { document.getElementById('bankroll-modal').style.display = 'flex'; return; }
+  const slip = loadSlip();
+  picks.forEach(p => {
+    const key = `${p.m.home||p.m.homeShort}|${p.m.away||p.m.awayShort}|${p.m.date}|${p.vb.outcome}`;
+    if (slip.some(s => `${s.homeName}|${s.awayName}|${s.matchDate}|${s.outcome}` === key)) return;
+    slip.push({ id: Date.now()+Math.random()+'',
+      homeName:  p.m.home  || p.m.homeShort,
+      awayName:  p.m.away  || p.m.awayShort,
+      league:    p.m.league, matchDate: p.m.date, outcome: p.vb.outcome,
+      oddsUser:  p.vb.bkOdds, stake: p.stake,
+      kellyStake: +(brl.current * p.vb.kelly / 100).toFixed(2),
+      addedAt:   new Date().toISOString() });
+  });
+  saveSlip(slip);
+  buildSidebar();
+  activeDate = 'SLIP'; _slipTab = 'active';
+  render();
+}
+
+function applyWizardI18n() {
+  const get = id => document.getElementById(id);
+  if (get('ap-wiz-title')) get('ap-wiz-title').textContent = _t('auto_wiz_title');
+  if (get('ap-wiz-sub'))   get('ap-wiz-sub').textContent   = _t('auto_wiz_sub');
+  if (get('ap-lbl-risk'))  get('ap-lbl-risk').textContent  = _t('auto_wiz_risk');
+  if (get('ap-lbl-maxbets')) get('ap-lbl-maxbets').textContent = _t('auto_wiz_max');
+  if (get('ap-lbl-leagues'))  get('ap-lbl-leagues').textContent = _t('auto_wiz_lg');
+  if (get('ap-wiz-btn'))   get('ap-wiz-btn').textContent   = _t('auto_wiz_btn');
+  if (get('ap-risk-conservative')) get('ap-risk-conservative').textContent = _t('auto_risk_con');
+  if (get('ap-risk-balanced'))     get('ap-risk-balanced').textContent     = _t('auto_risk_bal');
+  if (get('ap-risk-aggressive'))   get('ap-risk-aggressive').textContent   = _t('auto_risk_agg');
+  const p = loadProfile();
+  if (!p) return;
+  const r = document.querySelector(`input[name="ap-risk"][value="${p.riskLevel}"]`);
+  if (r) r.checked = true;
+  const b = document.querySelector(`input[name="ap-maxbets"][value="${p.maxBetsPerDay}"]`);
+  if (b) b.checked = true;
+  document.querySelectorAll('.ap-league-cb').forEach(cb => { cb.checked = p.leagues.includes(cb.value); });
+}
 
 // ═══════════════════════════════════════════════════════════
 // BANKROLL & SLIP SYSTEM — v5.0
