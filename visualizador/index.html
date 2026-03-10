@@ -3321,22 +3321,44 @@ async function analyzeRiskWithOllama() {
   const slip = loadSlip(); const brl = loadBankroll();
   const btn  = document.getElementById('ollama-risk-btn');
   const box  = document.getElementById('ollama-risk-box');
-  if (!slip.length) { if(box) box.innerHTML='<span style="color:var(--muted)">Añade picks primero.</span>'; return; }
-  btn.disabled = true; btn.textContent = '⏳ Analizando...';
-  if(box) box.innerHTML = '<span style="color:var(--muted)">Consultando Qwen3...</span>';
+  if (!btn || !box) return;
 
-  const total    = slip.reduce((s,b) => s + parseFloat(b.stake||0), 0);
-  const exposure = brl ? (total/brl.current*100).toFixed(1) : '?';
-  const prompt   = `Eres un gestor de riesgo de apuestas. Analiza este slip en español.
+  if (!slip.length) {
+    box.style.display = 'block';
+    box.innerHTML = '<span style="color:var(--muted)">Añade picks al slip primero.</span>';
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = '⏳ Analizando...';
+  box.style.display = 'block';
+  box.innerHTML = '<span style="color:var(--muted)">Consultando Qwen3...</span>';
+
+  // Build context depending on whether we're in combinada tab or activo tab
+  const isCombinada = _slipTab === 'combined';
+  const combStakeEl = document.getElementById('comb-stake');
+  const combStake   = isCombinada && combStakeEl ? parseFloat(combStakeEl.value || 10) : null;
+  const combOdds    = isCombinada ? +slip.reduce((p,b) => p * parseFloat(b.oddsUser||1), 1).toFixed(3) : null;
+  const total       = isCombinada ? (combStake || 10) : slip.reduce((s,b) => s + parseFloat(b.stake||0), 0);
+  const exposure    = brl ? (total / brl.current * 100).toFixed(1) : '?';
+
+  const picksLines = slip.map((b,i) => {
+    const kw = !isCombinada && b.kellyStake && parseFloat(b.stake) > b.kellyStake * 1.5
+      ? ` [SUPERA KELLY x${(b.stake/b.kellyStake).toFixed(1)}]` : '';
+    return `${i+1}. ${b.homeName} vs ${b.awayName} [${b.league}] | ${_outcomeLabel(b.outcome)} @${b.oddsUser}${kw}`;
+  }).join('\n');
+
+  const tipoApuesta = isCombinada
+    ? `COMBINADA ${slip.length} piernas — Cuota combinada @${combOdds} — Stake €${combStake}`
+    : `SIMPLES (${slip.length} picks independientes)`;
+
+  const prompt = `Eres un gestor de riesgo de apuestas. Analiza en español.
 
 BANKROLL: €${brl?.current?.toFixed(2)||'?'} (inicial €${brl?.initial?.toFixed(2)||'?'})
+TIPO: ${tipoApuesta}
 EXPOSICIÓN: €${total.toFixed(2)} (${exposure}% del bankroll)
 
 PICKS:
-${slip.map((b,i) => {
-  const kw = b.kellyStake && parseFloat(b.stake) > b.kellyStake*1.5 ? ' [SUPERA KELLY x'+((b.stake/b.kellyStake).toFixed(1))+']' : '';
-  return `${i+1}. ${b.homeName} vs ${b.awayName} [${b.league}] | ${_outcomeLabel(b.outcome)} @${b.oddsUser} | Stake €${b.stake}${kw}`;
-}).join('\n')}
+${picksLines}
 
 Responde SOLO con:
 RIESGO: (Bajo/Medio/Alto/Muy Alto)
@@ -3345,17 +3367,20 @@ CONSEJO: (1-2 frases concretas)`;
 
   try {
     const r = await fetch('http://localhost:11434/api/chat', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       signal: AbortSignal.timeout(60000),
-      body: JSON.stringify({ model:'qwen3.5:9b', messages:[{role:'user',content:prompt}],
-        stream:false, think:false, options:{temperature:0.1} })
+      body: JSON.stringify({ model: 'qwen3.5:9b',
+        messages: [{role:'user', content: prompt}],
+        stream: false, think: false, options: {temperature: 0.1} })
     });
     const d = await r.json();
-    const txt = (d.message?.content||'Sin respuesta').replace(/\n/g,'<br>');
-    if(box) box.innerHTML = `<div style="line-height:1.7">${txt}</div>`;
+    const txt = (d.message?.content || 'Sin respuesta').replace(/\n/g, '<br>');
+    box.innerHTML = `<div style="line-height:1.7">${txt}</div>`;
   } catch(e) {
-    if(box) box.innerHTML = '<span style="color:var(--accent-orange)">Ollama no disponible en localhost:11434</span>';
-  } finally { btn.disabled=false; btn.textContent='🤖 Analizar riesgo'; }
+    box.innerHTML = '<span style="color:var(--accent-orange)">Ollama no disponible en localhost:11434 — ¿está corriendo?</span>';
+  } finally {
+    btn.disabled = false; btn.textContent = '🤖 Analizar riesgo';
+  }
 }
 
 // ── Main SLIP view renderer ──
