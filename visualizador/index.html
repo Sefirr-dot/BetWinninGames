@@ -3476,53 +3476,61 @@ function saveAutopilotProfile() {
 function selectAutopilotBets() {
   const profile  = loadProfile();
   const bankroll = loadBankroll();
-  if (!profile || !bankroll) return [];
+  if (!profile || !bankroll) return { picks: [], relaxedStars: null };
 
   const kellyMult = { conservative: 0.5, balanced: 1.0, aggressive: 1.5 }[profile.riskLevel] || 1.0;
   const leagueRoi = (window.TRACKER_METRICS?.per_league) || {};
+  const wantedMin = profile.minStars || 5;
 
-  const candidates = [];
-  ALL_MATCHES.forEach(m => {
-    if (!m.valueBets?.length) return;
-    if (m.stars < profile.minStars) return;
-    if (!profile.leagues.includes(m.league)) return;
-    if (profile.activeDates?.length && !profile.activeDates.includes(m.date)) return;
-
-    m.valueBets.forEach(vb => {
-      if (vb.bkOdds < profile.minOdds) return;
-      const market = vb.outcome === 'over25' ? 'over25' : vb.outcome === 'btts' ? 'btts' : '1x2';
-      if (!profile.markets.includes(market)) return;
-
-      const lgData = leagueRoi[m.league];
-      const lgRoi  = lgData?.roi ?? 0;
-      const lgMult = Math.max(0.5, Math.min(2.0, 1.0 + lgRoi));
-      const score  = (vb.edge / 100) * (vb.kelly / 100) * lgMult;
-      candidates.push({ m, vb, score, league: m.league, date: m.date });
+  const _collect = (minSt) => {
+    const out = [];
+    ALL_MATCHES.forEach(m => {
+      if (!m.valueBets?.length || m.stars < minSt) return;
+      if (!profile.leagues.includes(m.league)) return;
+      if (profile.activeDates?.length && !profile.activeDates.includes(m.date)) return;
+      m.valueBets.forEach(vb => {
+        if (vb.bkOdds < profile.minOdds) return;
+        const market = vb.outcome === 'over25' ? 'over25' : vb.outcome === 'btts' ? 'btts' : '1x2';
+        if (!profile.markets.includes(market)) return;
+        const lgMult = Math.max(0.5, Math.min(2.0, 1.0 + (leagueRoi[m.league]?.roi ?? 0)));
+        out.push({ m, vb, score: (vb.edge/100)*(vb.kelly/100)*lgMult, league: m.league, date: m.date });
+      });
     });
-  });
+    return out;
+  };
 
+  // Progressive fallback: 5★ → 4★ → 3★
+  let candidates = _collect(wantedMin);
+  let effectiveMin = wantedMin;
+  for (const fallback of [4, 3]) {
+    if (candidates.length >= profile.maxBetsPerDay || effectiveMin <= fallback) break;
+    candidates = _collect(fallback);
+    effectiveMin = fallback;
+  }
+  const relaxedStars = effectiveMin < wantedMin ? effectiveMin : null;
+
+  // Deduplicate per match, limit to maxBetsPerDay
   candidates.sort((a, b) => b.score - a.score);
-  const seen = new Set();
-  const picked = [];
+  const seen = new Set(), picked = [];
   for (const c of candidates) {
     const key = `${c.date}|${c.m.home}|${c.m.away}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    picked.push(c);
+    if (!seen.has(key)) { seen.add(key); picked.push(c); }
     if (picked.length >= profile.maxBetsPerDay) break;
   }
 
+  // Correlation penalty + stakes
   const leagueCount = {};
   picked.forEach(c => { const k = `${c.league}|${c.date}`; leagueCount[k] = (leagueCount[k]||0)+1; });
+  const maxPerBet = bankroll.current * (profile.maxExposurePct/100) / Math.max(picked.length, 1);
 
-  const maxPerBet = bankroll.current * (profile.maxExposurePct / 100) / Math.max(picked.length, 1);
-  return picked.map(c => {
+  const picks = picked.map(c => {
     const k       = `${c.league}|${c.date}`;
     const corrPen = leagueCount[k] >= 3 ? 0.65 : leagueCount[k] === 2 ? 0.80 : 1.0;
     const stake   = +Math.min((c.vb.kelly/100) * bankroll.current * kellyMult * corrPen, maxPerBet).toFixed(2);
-    const ev      = +(stake * c.vb.edge / 100).toFixed(2);
-    return { ...c, stake, ev, correlated: leagueCount[k] > 1 };
+    return { ...c, stake, ev: +(stake * c.vb.edge / 100).toFixed(2), correlated: leagueCount[k] > 1 };
   });
+
+  return { picks, relaxedStars };
 }
 
 // ── Render autopilot view ──
@@ -3542,7 +3550,7 @@ function renderAutopilotView() {
     return;
   }
 
-  const picks       = selectAutopilotBets();
+  const { picks, relaxedStars } = selectAutopilotBets();
   const totalStake  = picks.reduce((s,p) => s+p.stake, 0);
   const totalEV     = picks.reduce((s,p) => s+p.ev, 0);
   const exposurePct = bankroll.current > 0 ? (totalStake/bankroll.current*100) : 0;
@@ -3574,6 +3582,12 @@ function renderAutopilotView() {
     ].map(([v,l,c]) => `<div class="ap-stat"><div class="ap-stat-val" style="color:${c}">${v}</div><div class="ap-stat-lbl">${l}</div></div>`).join('')}
   </div>` : '';
 
+  const relaxWarn = relaxedStars ? `
+  <div style="background:rgba(240,180,41,.1);border:1px solid rgba(240,180,41,.3);border-radius:8px;padding:8px 14px;font-size:12px;color:var(--accent-gold);margin:12px 24px 0">
+    ⚡ ${LANG==='es'
+      ? `Sin picks ${profile.minStars||5}★ con value bet — mostrando mejores picks ${relaxedStars}★+`
+      : `No ${profile.minStars||5}★ value picks available — showing best ${relaxedStars}★+ picks`}
+  </div>` : '';
   const corrWarn = hasCorr ? `<div class="ap-corr-warn" style="margin:12px 24px 0">${_t('auto_corr')}</div>` : '';
 
   const pickCards = picks.length ? picks.map((p, i) => `
@@ -3605,12 +3619,12 @@ function renderAutopilotView() {
     <button onclick="autopilotAddAll()" class="slip-cta" style="flex:1">${_t('auto_accept')}</button>
   </div>` : '';
 
-  container.innerHTML = header + summaryBar + corrWarn +
+  container.innerHTML = header + summaryBar + relaxWarn + corrWarn +
     `<div style="padding:16px 0;display:flex;flex-direction:column;gap:10px">${pickCards}</div>` + footer;
 }
 
 function autopilotAddAll() {
-  const picks = selectAutopilotBets();
+  const { picks } = selectAutopilotBets();
   if (!picks.length) return;
   const brl = loadBankroll();
   if (!brl) { document.getElementById('bankroll-modal').style.display = 'flex'; return; }
