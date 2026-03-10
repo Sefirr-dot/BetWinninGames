@@ -3264,7 +3264,41 @@ function settleBets() {
     const totalPnl = history.filter(b => b.settled).reduce((s, b) => s + b.pnl, 0);
     bankroll.current = +(bankroll.initial + totalPnl).toFixed(2);
     saveBankroll(bankroll);
+
+    // Toast with settlement summary
+    const justSettled = history.filter(b => b.settled && b.settledAt &&
+      (Date.now() - new Date(b.settledAt).getTime()) < 5000);
+    if (justSettled.length) {
+      const netPnl = justSettled.reduce((s, b) => s + b.pnl, 0);
+      const won  = justSettled.filter(b => b.result === 'won').length;
+      const lost = justSettled.filter(b => b.result === 'lost').length;
+      const sign = netPnl >= 0 ? '+' : '';
+      _showSettlementToast(
+        `${justSettled.length} bet${justSettled.length > 1 ? 's' : ''} liquidado${justSettled.length > 1 ? 's' : ''} · `
+        + (won  ? `✅ ${won} ganado${won  > 1 ? 's' : ''} ` : '')
+        + (lost ? `❌ ${lost} perdido${lost > 1 ? 's' : ''} ` : '')
+        + `· ${sign}€${Math.abs(netPnl).toFixed(2)}`
+      );
+    }
   }
+}
+
+function _showSettlementToast(msg) {
+  let t = document.getElementById('_settlement-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = '_settlement-toast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);'
+      + 'background:var(--surface);border:1px solid var(--accent-teal);border-radius:10px;'
+      + 'padding:12px 24px;font-size:13px;font-weight:600;color:var(--text);'
+      + 'box-shadow:0 4px 24px rgba(0,0,0,.4);z-index:99999;'
+      + 'transition:opacity .4s;white-space:nowrap;max-width:90vw;text-align:center';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = '0'; }, 5000);
 }
 
 // ── Add to slip (called from match cards / modal) ──
@@ -3622,7 +3656,149 @@ function renderSlipView() {
         </div>`;
       }).join('');
 
-      body = `${sparkline}<div class="slip-body" style="padding-top:4px">${histRows}</div>`;
+      // ── Personal stats ──
+      const sWon      = settled.filter(b => b.result === 'won');
+      const sLost     = settled.filter(b => b.result === 'lost');
+      const winRate   = settled.length ? (sWon.length / settled.length * 100).toFixed(0) : '—';
+      const totalPnl  = settled.reduce((s,b) => s + b.pnl, 0);
+      const roi       = brl && settled.length
+        ? (totalPnl / settled.reduce((s,b) => s + parseFloat(b.stake||0), 0) * 100).toFixed(1)
+        : '—';
+      const avgOdds   = settled.length
+        ? (settled.reduce((s,b) => s + parseFloat(b.combinedOdds || b.oddsUser || 0), 0) / settled.length).toFixed(2)
+        : '—';
+      // Current streak
+      let streak = 0, streakType = '';
+      for (const b of [...settled].sort((a,b2) => (b2.settledAt||'') > (a.settledAt||'') ? 1:-1)) {
+        if (!streakType) streakType = b.result;
+        if (b.result === streakType) streak++; else break;
+      }
+      const streakStr = streak > 1 ? `${streak} ${streakType === 'won' ? '✅' : '❌'} seguidas` : '—';
+      const pnlColor  = totalPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-orange)';
+      const roiColor  = parseFloat(roi) >= 0 ? 'var(--accent-green)' : 'var(--accent-orange)';
+
+      const statsBar = settled.length ? `
+        <div style="display:flex;flex-wrap:wrap;gap:10px;padding:14px 24px;background:var(--surface2);border-bottom:1px solid var(--border)">
+          ${[
+            ['Win rate',   `${winRate}%`,    winRate !== '—' && +winRate >= 50 ? 'var(--accent-green)' : 'var(--accent-orange)'],
+            ['ROI real',   `${roi >= 0 ? '+' : ''}${roi}%`, roiColor],
+            ['P&L',        `${totalPnl>=0?'+':''}€${totalPnl.toFixed(2)}`, pnlColor],
+            ['Cuota media',`@${avgOdds}`,    'var(--accent-gold)'],
+            ['Racha',      streakStr,         streakType === 'won' ? 'var(--accent-green)' : 'var(--accent-orange)'],
+            ['Resueltos',  `${settled.length}/${hist.length}`, 'var(--text)'],
+          ].map(([label, val, col]) => `
+            <div style="text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 14px;min-width:80px">
+              <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">${label}</div>
+              <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:${col};margin-top:2px">${val}</div>
+            </div>`).join('')}
+        </div>` : '';
+
+      // ── Pending section ──
+      const pendingBets = hist.filter(b => !b.settled);
+      const pendingSection = pendingBets.length ? `
+        <div style="padding:10px 24px 4px">
+          <div style="font-size:11px;font-weight:700;color:var(--accent-yellow);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">
+            ⏳ Pendientes de resultado (${pendingBets.length})
+          </div>
+          ${pendingBets.map((b, idx) => {
+            const title = b.type === 'combinada'
+              ? `🔗 Combinada ${b.legs?.length} piernas @${b.combinedOdds}`
+              : `${b.homeName} vs ${b.awayName}`;
+            const dId = `pend-detail-${idx}`;
+            const detailLeg = b.type === 'combinada'
+              ? (b.legs||[]).map((leg,i) => {
+                  const legRes = window.RESOLVED_RESULTS?.[`${leg.homeName}|${leg.awayName}|${leg.matchDate}`];
+                  const legWon = legRes ? resolveOutcome(leg.outcome, legRes) : null;
+                  const icon   = legWon === true ? '✅' : legWon === false ? '❌' : '⏳';
+                  return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
+                    <span style="color:var(--muted)">${i+1}</span>
+                    <span>${leg.homeName} vs ${leg.awayName}</span>
+                    <span style="color:${_outcomeColor(leg.outcome)};font-weight:600">${_outcomeLabel(leg.outcome)}</span>
+                    <span style="color:var(--muted)">@${leg.oddsUser}</span>
+                    <span style="margin-left:auto">${icon}</span>
+                  </div>`;
+                }).join('')
+              : `<div style="font-size:12px;display:flex;gap:16px;flex-wrap:wrap">
+                  <span>Liga <b>${b.league||'—'}</b></span>
+                  <span>Apuesta <b style="color:${_outcomeColor(b.outcome)}">${_outcomeLabel(b.outcome)}</b></span>
+                  <span>Cuota <b style="color:var(--accent-gold)">@${b.oddsUser}</b></span>
+                  <span>Fecha partido <b>${b.matchDate||'—'}</b></span>
+                </div>`;
+            return `
+            <div>
+              <div class="hist-row" onclick="(()=>{const d=document.getElementById('${dId}');d.style.display=d.style.display==='none'?'block':'none'})()"
+                style="cursor:pointer;user-select:none">
+                <div style="flex:1">
+                  <div style="font-size:13px;font-weight:600">${title}</div>
+                  <div style="font-size:11px;color:var(--muted);margin-top:2px">${(b.placedAt||'').slice(0,10)} · Stake €${b.stake}</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span class="hist-badge-pending">PENDIENTE</span>
+                  <span style="color:var(--muted);font-size:14px">▾</span>
+                </div>
+              </div>
+              <div id="${dId}" style="display:none;background:var(--surface2);padding:10px 14px;border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;margin-bottom:4px">
+                ${detailLeg}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div style="margin:0 24px 4px;border-bottom:1px solid var(--border)"></div>` : '';
+
+      // Settled rows only
+      const settledRows = [...settled].sort((a,b2) => (b2.settledAt||b2.placedAt||'') > (a.settledAt||a.placedAt||'') ? 1:-1)
+        .map((b, idx) => {
+          const badge = b.result === 'won'
+            ? `<span class="hist-badge-won">GANADO +€${b.pnl.toFixed(2)}</span>`
+            : `<span class="hist-badge-lost">PERDIDO -€${Math.abs(b.pnl).toFixed(2)}</span>`;
+          const title = b.type === 'combinada'
+            ? `🔗 Combinada ${b.legs?.length} piernas @${b.combinedOdds}`
+            : `${b.homeName} vs ${b.awayName}`;
+          let detail = '';
+          if (b.type === 'combinada') {
+            detail = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Piernas:</div>`
+              + (b.legs||[]).map((leg,i) => {
+                  const legRes = window.RESOLVED_RESULTS?.[`${leg.homeName}|${leg.awayName}|${leg.matchDate}`];
+                  const icon   = legRes ? (resolveOutcome(leg.outcome,legRes)?'✅':'❌') : '⏳';
+                  return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
+                    <span style="color:var(--muted)">${i+1}</span><span>${leg.homeName} vs ${leg.awayName}</span>
+                    <span style="color:${_outcomeColor(leg.outcome)};font-weight:600">${_outcomeLabel(leg.outcome)}</span>
+                    <span style="color:var(--muted)">@${leg.oddsUser}</span><span style="margin-left:auto">${icon}</span></div>`;
+                }).join('')
+              + `<div style="display:flex;gap:16px;margin-top:8px;font-size:12px">
+                  <span style="color:var(--muted)">Stake <b>€${b.stake}</b></span>
+                  <span style="color:var(--muted)">Cuota <b style="color:var(--accent-gold)">@${b.combinedOdds}</b></span>
+                 </div>`;
+          } else {
+            const pColor = b.result === 'won' ? 'var(--accent-green)' : 'var(--accent-orange)';
+            detail = `<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px">
+              <span style="color:var(--muted)">Liga <b>${b.league||'—'}</b></span>
+              <span style="color:var(--muted)">Apuesta <b style="color:${_outcomeColor(b.outcome)}">${_outcomeLabel(b.outcome)}</b></span>
+              <span style="color:var(--muted)">Cuota <b style="color:var(--accent-gold)">@${b.oddsUser}</b></span>
+              <span style="color:var(--muted)">Stake <b>€${b.stake}</b></span>
+              <span style="color:var(--muted)">Resultado <b style="color:${pColor}">${b.result==='won'?'+':'−'}€${Math.abs(b.pnl).toFixed(2)}</b></span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:5px">
+              Registrado: ${(b.placedAt||'').replace('T',' ').slice(0,16)}
+              ${b.settledAt?' · Liquidado: '+b.settledAt.replace('T',' ').slice(0,16):''}
+            </div>`;
+          }
+          const dId = `sett-detail-${idx}`;
+          return `<div>
+            <div class="hist-row" onclick="(()=>{const d=document.getElementById('${dId}');d.style.display=d.style.display==='none'?'block':'none'})()" style="cursor:pointer;user-select:none">
+              <div style="flex:1">
+                <div style="font-size:13px;font-weight:600">${title}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">${(b.settledAt||b.placedAt||'').slice(0,10)} · Stake €${b.stake}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">${badge}<span style="color:var(--muted);font-size:14px">▾</span></div>
+            </div>
+            <div id="${dId}" style="display:none;background:var(--surface2);padding:10px 14px;border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;margin-bottom:4px">${detail}</div>
+          </div>`;
+        }).join('');
+
+      const settledHeader = settled.length ? `<div style="padding:10px 24px 4px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Resueltos (${settled.length})</div>` : '';
+
+      body = `${statsBar}${sparkline}${pendingSection}<div class="slip-body" style="padding-top:4px">${settledHeader}${settledRows}</div>`;
     }
   }
 
