@@ -17,6 +17,7 @@ odds/*.csv
 visualizador/data/predictions.js
 visualizador/data/tracker_data.js
 visualizador/data/backtest_data.js
+visualizador/data/results.js
 backtest_*.txt
 predicciones_*.txt
 
