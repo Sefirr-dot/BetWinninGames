@@ -213,6 +213,11 @@ Draw model pretrain (6595 matches): tasa_draw=0.249, loss=0.5577.
 Weights: bias=-1.86, dc=+2.29, elo=+1.61, h2h=+0.10, mkt=-0.62.
 Interpretation: DC and Elo draw probs are the strongest predictors; market draw implied prob slightly corrects downward (market overprices draws).
 
+Over25 model pretrain (6595 matches): tasa_over25=~0.52, loss converged.
+Weights: bias=-0.896, mc_over25=+4.087, lam_plus_mu=-0.206, btts_prob=-1.009.
+Interpretation: MC over25 is the dominant predictor; btts_prob=-1.009 corrects downward
+when both teams are likely to score (1-1 style game has BTTS but not Over2.5).
+
 ### meta_learner distribution shift
 `source='live'` vs `source='backtest'` column separates real picks from seeds. `meta_learner.train(real_only=True)` enforces this. If predictions look wrong: `rename cache\meta_learner.pkl cache\meta_learner.pkl.bak`.
 
