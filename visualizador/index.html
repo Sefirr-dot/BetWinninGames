@@ -1368,14 +1368,18 @@ select.sort-select:focus { border-color: #3d6090; }
     <div style="margin-bottom:20px">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px" id="ap-lbl-risk">Risk level</div>
       <div style="display:flex;gap:8px">
-        ${['conservative','balanced','aggressive'].map(r => `
         <label style="flex:1;cursor:pointer">
-          <input type="radio" name="ap-risk" value="${r}" style="display:none" ${r==='balanced'?'checked':''}>
-          <div class="ap-radio-btn" data-val="${r}">
-            <div style="font-size:16px">${r==='conservative'?'🛡️':r==='balanced'?'⚖️':'🚀'}</div>
-            <div style="font-size:11px;font-weight:600;margin-top:4px;text-transform:capitalize" id="ap-risk-${r}">${r}</div>
-          </div>
-        </label>`).join('')}
+          <input type="radio" name="ap-risk" value="conservative" style="display:none">
+          <div class="ap-radio-btn"><div style="font-size:16px">🛡️</div><div style="font-size:11px;font-weight:600;margin-top:4px" id="ap-risk-conservative">Conservative</div></div>
+        </label>
+        <label style="flex:1;cursor:pointer">
+          <input type="radio" name="ap-risk" value="balanced" style="display:none" checked>
+          <div class="ap-radio-btn"><div style="font-size:16px">⚖️</div><div style="font-size:11px;font-weight:600;margin-top:4px" id="ap-risk-balanced">Balanced</div></div>
+        </label>
+        <label style="flex:1;cursor:pointer">
+          <input type="radio" name="ap-risk" value="aggressive" style="display:none">
+          <div class="ap-radio-btn"><div style="font-size:16px">🚀</div><div style="font-size:11px;font-weight:600;margin-top:4px" id="ap-risk-aggressive">Aggressive</div></div>
+        </label>
       </div>
     </div>
 
@@ -1383,11 +1387,11 @@ select.sort-select:focus { border-color: #3d6090; }
     <div style="margin-bottom:20px">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px" id="ap-lbl-maxbets">Max bets per day</div>
       <div style="display:flex;gap:8px">
-        ${[1,2,3,4,5].map(n => `
-        <label style="flex:1;cursor:pointer">
-          <input type="radio" name="ap-maxbets" value="${n}" style="display:none" ${n===3?'checked':''}>
-          <div class="ap-radio-btn" data-val="${n}" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800">${n}</div>
-        </label>`).join('')}
+        <label style="flex:1;cursor:pointer"><input type="radio" name="ap-maxbets" value="1" style="display:none"><div class="ap-radio-btn" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800">1</div></label>
+        <label style="flex:1;cursor:pointer"><input type="radio" name="ap-maxbets" value="2" style="display:none"><div class="ap-radio-btn" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800">2</div></label>
+        <label style="flex:1;cursor:pointer"><input type="radio" name="ap-maxbets" value="3" style="display:none" checked><div class="ap-radio-btn" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800">3</div></label>
+        <label style="flex:1;cursor:pointer"><input type="radio" name="ap-maxbets" value="4" style="display:none"><div class="ap-radio-btn" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800">4</div></label>
+        <label style="flex:1;cursor:pointer"><input type="radio" name="ap-maxbets" value="5" style="display:none"><div class="ap-radio-btn" style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800">5</div></label>
       </div>
     </div>
 
@@ -1395,13 +1399,51 @@ select.sort-select:focus { border-color: #3d6090; }
     <div style="margin-bottom:20px">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px" id="ap-lbl-leagues">Leagues</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${['PL','PD','BL1','FL1'].map(lg => `
-        <label style="cursor:pointer">
-          <input type="checkbox" class="ap-league-cb" value="${lg}" checked style="display:none">
-          <div class="ap-check-btn league-badge badge-${lg}">${lg}</div>
-        </label>`).join('')}
+        <label style="cursor:pointer"><input type="checkbox" class="ap-league-cb" value="PL"  checked style="display:none"><div class="ap-check-btn league-badge badge-PL">PL</div></label>
+        <label style="cursor:pointer"><input type="checkbox" class="ap-league-cb" value="PD"  checked style="display:none"><div class="ap-check-btn league-badge badge-PD">PD</div></label>
+        <label style="cursor:pointer"><input type="checkbox" class="ap-league-cb" value="BL1" checked style="display:none"><div class="ap-check-btn league-badge badge-BL1">BL1</div></label>
+        <label style="cursor:pointer"><input type="checkbox" class="ap-league-cb" value="FL1" checked style="display:none"><div class="ap-check-btn league-badge badge-FL1">FL1</div></label>
       </div>
     </div>
+
+    <script>
+    // Make radio/checkbox buttons visually reflect checked state on click
+    document.addEventListener('change', e => {
+      if (e.target.name === 'ap-risk') {
+        document.querySelectorAll('input[name="ap-risk"]').forEach(r => {
+          r.nextElementSibling.style.borderColor = r.checked ? 'var(--accent-teal)' : '';
+          r.nextElementSibling.style.background  = r.checked ? 'rgba(20,184,166,.15)' : '';
+          r.nextElementSibling.style.color        = r.checked ? 'var(--accent-teal)' : '';
+        });
+      }
+      if (e.target.name === 'ap-maxbets') {
+        document.querySelectorAll('input[name="ap-maxbets"]').forEach(r => {
+          r.nextElementSibling.style.borderColor = r.checked ? 'var(--accent-teal)' : '';
+          r.nextElementSibling.style.background  = r.checked ? 'rgba(20,184,166,.15)' : '';
+          r.nextElementSibling.style.color        = r.checked ? 'var(--accent-teal)' : '';
+        });
+      }
+      if (e.target.classList.contains('ap-league-cb')) {
+        e.target.nextElementSibling.style.borderColor = e.target.checked ? 'var(--accent-teal)' : '';
+        e.target.nextElementSibling.style.background  = e.target.checked ? 'rgba(20,184,166,.15)' : '';
+      }
+    });
+    // Init visual state for pre-checked inputs
+    window.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('input[name="ap-risk"]:checked, input[name="ap-maxbets"]:checked').forEach(r => {
+        if (r.nextElementSibling) {
+          r.nextElementSibling.style.borderColor = 'var(--accent-teal)';
+          r.nextElementSibling.style.background  = 'rgba(20,184,166,.15)';
+          r.nextElementSibling.style.color        = 'var(--accent-teal)';
+        }
+      });
+      document.querySelectorAll('.ap-league-cb:checked').forEach(cb => {
+        if (cb.nextElementSibling) {
+          cb.nextElementSibling.style.borderColor = 'var(--accent-teal)';
+        }
+      });
+    });
+    </script>
 
     <button onclick="saveAutopilotProfile()" id="ap-wiz-btn"
       style="background:var(--accent-green);border:none;border-radius:10px;padding:14px;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:#000;cursor:pointer;width:100%;margin-top:8px">
