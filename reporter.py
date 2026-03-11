@@ -421,6 +421,10 @@ def _prediction_to_dict(entry: dict, date_str: str, match_vbs: list[dict], stand
             "oddsMovement":   round(vb["odds_movement"], 3) if vb.get("odds_movement") else None,
             "pinnacleProb":   round(vb["pinnacle_prob"] * 100, 1) if vb.get("pinnacle_prob") else None,
             "clvVsPinnacle":  round(vb["clv_vs_pinnacle"] * 100, 1) if vb.get("clv_vs_pinnacle") is not None else None,
+            "sharpnessScore":   int(vb.get("sharpness_score", 0)),
+            "mis":              round(vb.get("market_inefficiency_score", 0.5), 3),
+            "corrDiscount":     round(vb.get("corr_discount", 1.0), 3),
+            "kellyPortfolio":   round(vb.get("kelly_portfolio", vb.get("kelly_fraction", 0)) * 100, 2),
         }
         for vb in match_vbs
     ] or None

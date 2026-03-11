@@ -2307,7 +2307,7 @@ function renderWinielaView() {
           <div style="margin-left:auto">
             <button id="winiela-slip-btn"
               style="background:var(--accent-teal);border:none;border-radius:7px;padding:7px 16px;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:#000;cursor:pointer">
-              _t('btn_add_bkrl')
+              ${_t('btn_add_bkrl')}
             </button>
           </div>
           <div class="parlay-disclaimer">¡Solo por diversión! · Apuesta con responsabilidad</div>
@@ -2400,7 +2400,7 @@ function renderBestBetsView(bets) {
             <div style="margin-left:auto">
               <button data-parlay-idx="${_parlayCache.length - 1}" onclick="loadParlayToSlip(_parlayCache[+this.dataset.parlayIdx])"
                 style="background:var(--accent-teal);border:none;border-radius:7px;padding:7px 16px;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:#000;cursor:pointer">
-                _t('btn_add_bkrl')
+                ${_t('btn_add_bkrl')}
               </button>
             </div>
             <div class="parlay-disclaimer">Solo informativo · Apuesta con responsabilidad</div>
@@ -2656,6 +2656,19 @@ function renderTrackingView() {
   const briColor = m.brier_score !== null && m.brier_score < 0.5 ? 'green' : m.brier_score < 0.6 ? 'gold' : 'red';
   const accColor = m.accuracy_1x2 !== null && m.accuracy_1x2 >= 0.5 ? 'green' : 'red';
 
+  // PSI drift badge
+  const psi = m.psi || {};
+  const psiVal = psi.psi_max;
+  const psiDrift = psi.drift_detected;
+  const psiColor = psiDrift ? 'var(--pd)' : (psiVal > 0.1 ? 'var(--accent-yellow, #facc15)' : 'var(--accent-green)');
+  const psiLabel = psiDrift ? '⚠ DRIFT' : (psiVal > 0.1 ? 'Moderado' : 'Estable');
+  const psiHtml = psiVal != null ? `
+    <div class="track-metric-card" style="${psiDrift ? 'border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.05)' : ''}">
+      <div class="track-metric-val" style="color:${psiColor}">${psiVal.toFixed(3)}</div>
+      <div class="track-metric-lbl">PSI Drift</div>
+      <div class="track-metric-sub" style="color:${psiColor}">${psiLabel}</div>
+    </div>` : '';
+
   const metricsHtml = `
     <div class="tracking-metrics">
       <div class="track-metric-card">
@@ -2678,6 +2691,7 @@ function renderTrackingView() {
         <div class="track-metric-lbl">Resueltos / Total</div>
         <div class="track-metric-sub">${m.n_pending} pendientes</div>
       </div>
+      ${psiHtml}
     </div>
     ${m.vb_n > 0 ? `
     <div style="margin-top:12px;background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:12px 16px">
@@ -2960,7 +2974,71 @@ function renderTrackingView() {
       </div>`;
   }
 
-  container.innerHTML = `<div class="track-view">${metricsHtml}${leagueBreakdownHtml}${starsBreakdownHtml}${tagBreakdownHtml}${chartHtml}${reliabilityHtml}${subModelHtml}${tableHtml}</div>`;
+  // Sub-model accuracy (last 30 picks) — from pre-computed tracker_metrics.json
+  let subModel30Html = '';
+  const sm30 = m.submodel_accuracy_30 || {};
+  const sm30Keys = Object.keys(sm30).filter(k => k !== 'n_window');
+  if (sm30Keys.length > 0) {
+    const nWin = sm30.n_window || 30;
+    const modelNames30 = { dc: 'Dixon-Coles', elo: 'Elo', h2h: 'H2H' };
+    const rows30 = sm30Keys.map(key => {
+      const v = sm30[key];
+      const acc = (v.accuracy * 100).toFixed(1);
+      const bri = v.brier !== undefined ? v.brier.toFixed(3) : '—';
+      const barColor = parseFloat(acc) >= 50 ? 'var(--accent-green)' : 'var(--pd)';
+      return `<tr>
+        <td style="font-weight:600">${modelNames30[key] || key}</td>
+        <td style="color:var(--muted)">${v.n}</td>
+        <td style="font-weight:700;color:${barColor}">${acc}%</td>
+        <td style="color:var(--muted)">${bri}</td>
+        <td style="width:90px">
+          <div style="background:rgba(255,255,255,0.07);border-radius:3px;height:7px;overflow:hidden">
+            <div style="background:${barColor};height:100%;width:${Math.min(100,parseFloat(acc))}%;border-radius:3px"></div>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+    subModel30Html = `
+      <div class="bankroll-chart" style="margin-top:20px">
+        <div class="bankroll-chart-title">Accuracy sub-modelos — ultimos ${nWin} picks resueltos</div>
+        <table class="model-table" style="margin-top:12px">
+          <thead><tr><th>Modelo</th><th>N</th><th>Accuracy</th><th>Brier</th><th>Barra</th></tr></thead>
+          <tbody>${rows30}</tbody>
+        </table>
+      </div>`;
+  }
+
+  // Bet timing analysis — best window per league
+  let timingHtml = '';
+  const timing = m.timing_analysis || {};
+  const timingLeagues = Object.keys(timing);
+  if (timingLeagues.length > 0) {
+    const timingRows = timingLeagues.map(lg => {
+      const ld = timing[lg];
+      const best = ld.window_best_clv || '—';
+      const wins = ['0-6h','6-24h','24-48h','48h+'].map(w => {
+        const wd = ld[w];
+        if (!wd) return `<td style="color:var(--muted)">—</td>`;
+        const clvStr = wd.avg_clv >= 0 ? '+' + (wd.avg_clv*100).toFixed(1) : (wd.avg_clv*100).toFixed(1);
+        const col = wd.avg_clv > 0 ? 'var(--accent-green)' : 'var(--pd)';
+        const isBest = w === best ? 'font-weight:800;' : '';
+        return `<td style="${isBest}color:${col}">${clvStr}% (n=${wd.n})</td>`;
+      }).join('');
+      return `<tr><td style="font-weight:700">${lg}</td>${wins}<td style="color:var(--accent-green);font-weight:700">${best}</td></tr>`;
+    }).join('');
+    timingHtml = `
+      <div class="bankroll-chart" style="margin-top:20px">
+        <div class="bankroll-chart-title">CLV por ventana de apuesta (horas antes del KO)</div>
+        <div style="overflow-x:auto;margin-top:10px">
+          <table class="model-table">
+            <thead><tr><th>Liga</th><th>0-6h</th><th>6-24h</th><th>24-48h</th><th>48h+</th><th>Mejor</th></tr></thead>
+            <tbody>${timingRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  container.innerHTML = `<div class="track-view">${metricsHtml}${leagueBreakdownHtml}${starsBreakdownHtml}${tagBreakdownHtml}${chartHtml}${reliabilityHtml}${subModelHtml}${subModel30Html}${timingHtml}${tableHtml}</div>`;
 }
 
 // ── VALUE BETS VIEW ──
@@ -3110,6 +3188,13 @@ function renderValueBetsView() {
             <span style="color:var(--muted);font-size:11px">${dateStr}${m.time ? ' · ' + m.time : ''}</span>
             <span class="vb-edge-badge">Edge +${vb.edge}%</span>
             <span class="vb-kelly-badge">Kelly ${vb.kelly}% → €${kellyEur}</span>
+            ${vb.sharpnessScore > 0 ? (() => {
+              const sc = vb.sharpnessScore;
+              const scColor = sc >= 80 ? 'var(--accent-green)' : sc >= 65 ? 'var(--bl1,#06b6d4)' : sc >= 50 ? '#facc15' : sc >= 35 ? '#f97316' : 'var(--muted)';
+              const scLabel = sc >= 80 ? 'Elite' : sc >= 65 ? 'Fuerte' : sc >= 50 ? 'Moderado' : sc >= 35 ? 'Bajo' : 'Minimo';
+              return `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(0,0,0,0.3);border:1px solid ${scColor}44;border-radius:6px;padding:2px 8px;font-size:10px;color:${scColor};font-weight:700">⚡ ${sc} ${scLabel}</span>`;
+            })() : ''}
+            ${vb.corrDiscount && vb.corrDiscount < 0.95 ? `<span style="font-size:10px;color:var(--accent-yellow,#facc15);background:rgba(0,0,0,0.3);border-radius:6px;padding:2px 7px;border:1px solid rgba(250,204,21,0.3)">🔗 Corr ×${vb.corrDiscount}</span>` : ''}
           </div>
           <div class="vb-prob-row">
             <span><div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Modelo</div><div class="vb-prob-val" style="color:var(--accent-green)">${vb.modelProb}%</div></span>
@@ -3117,6 +3202,7 @@ function renderValueBetsView() {
             ${vb.pinnacleProb ? `<span><div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Pinnacle</div><div class="vb-prob-val" style="color:var(--accent-teal)">${vb.pinnacleProb}%</div></span>` : `<span><div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Cuota Justa</div><div class="vb-prob-val" style="color:var(--accent-gold)">${m.fairOdds ? '@'+m.fairOdds : '—'}</div></span>`}
           </div>
           ${vb.clvVsPinnacle !== null && vb.clvVsPinnacle !== undefined ? `<div style="margin-top:4px;font-size:11px;color:${vb.clvVsPinnacle >= 0 ? 'var(--accent-teal)' : 'var(--accent-orange)'}">CLV vs Pinnacle ${vb.clvVsPinnacle >= 0 ? '+' : ''}${vb.clvVsPinnacle}%</div>` : ''}
+          ${vb.kellyPortfolio && vb.kellyPortfolio !== vb.kelly ? `<div style="margin-top:4px;font-size:11px;color:var(--muted)">Markowitz: <span style="color:var(--accent-green);font-weight:700">${vb.kellyPortfolio}%</span> <span style="opacity:0.6">(vs Kelly ${vb.kelly}%)</span></div>` : ''}
         </div>
         <div class="vb-card-right">
           <div class="vb-odds-val">@${vb.bkOdds}</div>

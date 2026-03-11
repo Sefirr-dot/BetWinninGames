@@ -39,9 +39,17 @@ OVER25_MODEL_PATH = "cache/over25_model.json"
 OVER25_MODEL_MIN_SAMPLES = 50
 
 
+_LAM_MU_NORM = 3.0  # normalisation: maps lam+mu (~[0.6,6]) to ~[0.2,2.0] scale
+# Matching scale of other [0,1] features ensures L2 penalises proportionally to
+# information content, not numerical scale. Without this, lam+mu would dominate
+# purely because it is 3× larger in magnitude.
+# IMPORTANT: changing this constant invalidates cache/over25_model.json — delete it
+# and re-run: python backtest.py --league ALL --seasons 2023 2024
+
+
 def _fv(mc_over25: float, lam_plus_mu: float, btts_prob: float) -> np.ndarray:
-    """Feature vector with bias term."""
-    return np.array([1.0, mc_over25, lam_plus_mu, btts_prob], dtype=float)
+    """Feature vector with bias term. lam_plus_mu normalised to comparable scale."""
+    return np.array([1.0, mc_over25, lam_plus_mu / _LAM_MU_NORM, btts_prob], dtype=float)
 
 
 _L2 = 0.01  # L2 regularisation — prevents unstable convergence across backtest runs

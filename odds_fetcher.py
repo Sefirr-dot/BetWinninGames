@@ -28,30 +28,78 @@ def _history_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(_HISTORY_DB)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS odds_history (
-            match_key  TEXT,
-            fetched_at REAL,
-            odds_1     REAL,
-            odds_x     REAL,
-            odds_2     REAL,
+            match_key        TEXT,
+            fetched_at       REAL,
+            odds_1           REAL,
+            odds_x           REAL,
+            odds_2           REAL,
+            hours_to_kickoff REAL,
             PRIMARY KEY (match_key, fetched_at)
         )
     """)
+    # Migration: add hours_to_kickoff to existing tables that predate this column
+    try:
+        conn.execute("ALTER TABLE odds_history ADD COLUMN hours_to_kickoff REAL")
+    except Exception:
+        pass  # column already exists
     conn.commit()
     return conn
 
 
-def save_odds_history(rows_by_date: dict[str, list[dict]]) -> None:
-    """Persist fetched odds to odds_history.db for movement tracking."""
+def save_odds_history(
+    rows_by_date: dict[str, list[dict]],
+    kickoff_times: dict[str, str] | None = None,
+) -> None:
+    """
+    Persist fetched odds to odds_history.db for movement tracking.
+
+    Parameters
+    ----------
+    rows_by_date   : {date_str: [row_dicts]}  — same structure as by_date in fetch_window()
+    kickoff_times  : optional {match_key: iso_kickoff_time}  — enables hours_to_kickoff tracking
+    """
     now = time.time()
     with _history_conn() as conn:
         for date_str, rows in rows_by_date.items():
             for row in rows:
                 key = f"{row['home_team']}|{row['away_team']}|{date_str}"
+                # Compute hours to kickoff when kickoff time is provided
+                htk = None
+                if kickoff_times and key in kickoff_times:
+                    try:
+                        from datetime import datetime, timezone
+                        kickoff_iso = kickoff_times[key]
+                        # Parse ISO format: "2026-03-07T15:00:00Z"
+                        kickoff_epoch = datetime.fromisoformat(
+                            kickoff_iso.replace("Z", "+00:00")
+                        ).timestamp()
+                        htk = (kickoff_epoch - now) / 3600  # negative after kickoff
+                    except Exception:
+                        htk = None
                 conn.execute(
-                    "INSERT OR REPLACE INTO odds_history VALUES (?,?,?,?,?)",
-                    (key, now, row["odds_1"], row["odds_x"], row["odds_2"]),
+                    "INSERT OR REPLACE INTO odds_history VALUES (?,?,?,?,?,?)",
+                    (key, now, row["odds_1"], row["odds_x"], row["odds_2"], htk),
                 )
         conn.commit()
+
+
+def get_odds_age_hours(home: str, away: str, match_date: str) -> float | None:
+    """
+    Return hours elapsed since the most recent odds snapshot for this match.
+
+    Used by value_detector to penalise stale odds in the Market Inefficiency Score.
+    Returns None when no snapshot exists.
+    """
+    if not os.path.exists(_HISTORY_DB):
+        return None
+    key = f"{home}|{away}|{match_date}"
+    with _history_conn() as conn:
+        row = conn.execute(
+            "SELECT MAX(fetched_at) FROM odds_history WHERE match_key=?", (key,)
+        ).fetchone()
+    if row and row[0]:
+        return (time.time() - row[0]) / 3600
+    return None
 
 
 def get_odds_movement(home: str, away: str, match_date: str) -> dict | None:
@@ -207,6 +255,9 @@ def fetch_window(
     date_set = set(dates)
     by_date: dict[str, list[dict]] = {d: [] for d in dates}
 
+    # kickoff_times maps match_key -> ISO kickoff time for hours_to_kickoff tracking
+    kickoff_times: dict[str, str] = {}
+
     def _process_league(code: str, sport_key: str) -> tuple[str, list[dict], str]:
         """Fetch + parse one league. Returns (code, rows, remaining)."""
         events, remaining = _fetch_sport(sport_key)
@@ -218,14 +269,20 @@ def fetch_window(
             odds = _best_odds(ev)
             if odds is None:
                 continue
-            rows.append((ev_date, {
+            row = {
                 "home_team": ev["home_team"],
                 "away_team": ev["away_team"],
                 "odds_1":    round(odds["odds_1"], 2),
                 "odds_x":    round(odds["odds_x"], 2),
                 "odds_2":    round(odds["odds_2"], 2),
                 "odds_o25":  round(odds["odds_o25"], 2) if odds.get("odds_o25") else "",
-            }))
+            }
+            rows.append((ev_date, row))
+            # Record kickoff time for hours_to_kickoff tracking
+            kickoff_iso = ev.get("commence_time", "")
+            if kickoff_iso:
+                mk = f"{ev['home_team']}|{ev['away_team']}|{ev_date}"
+                kickoff_times[mk] = kickoff_iso
             matched += 1
         print(f"    [{code}] {matched} partidos con cuotas  "
               f"(quota restante: {remaining})")
@@ -263,7 +320,7 @@ def fetch_window(
     if not written:
         print("    [odds_fetcher] Sin cuotas para las fechas solicitadas.")
     else:
-        save_odds_history(by_date)
+        save_odds_history(by_date, kickoff_times=kickoff_times)
 
     return written
 

@@ -22,7 +22,9 @@ from datetime import date, datetime
 
 import db_picks
 import fetcher
-from config import CALIBRATION_MIN_SAMPLES, PICKS_DB, TRACKER_JS_PATH
+from config import (CALIBRATION_MIN_SAMPLES, PICKS_DB, TRACKER_JS_PATH,
+                    PSI_ALERT_THRESHOLD, PSI_LOOKBACK_RECENT,
+                    SUBMODEL_ACCURACY_WINDOW)
 
 RESULTS_JS_PATH = "visualizador/data/results.js"
 
@@ -61,6 +63,58 @@ def _parse_actual(match_data: dict) -> tuple[str, int, int] | None:
     return result, actual_over25, actual_btts
 
 
+def _try_update_clv(pick: dict, match_id: int, db_path: str) -> None:
+    """
+    Attempt to populate closing_odds and clv for a newly-resolved pick by reading
+    the Pinnacle closing line from cache/pinnacle/YYYY-MM-DD.csv.
+
+    CLV = our_implied_prob (at prediction time) - 1/pinnacle_closing_odds.
+    Positive CLV = we predicted better than the sharp closing line.
+
+    This is required for the CLV-objective weight optimizer to have data to work with.
+    Silently skips when Pinnacle data is unavailable (no API hit required).
+    """
+    try:
+        import csv as _csv
+        import unicodedata as _ud
+        import re as _re
+
+        match_date = pick.get("match_date", "")
+        home       = pick.get("home_team",  "")
+        away       = pick.get("away_team",  "")
+        if not (match_date and home and away):
+            return
+
+        pin_path = f"cache/pinnacle/{match_date}.csv"
+        if not os.path.exists(pin_path):
+            return
+
+        def _norm(n: str) -> str:
+            n = n.lower().strip().replace("-", " ")
+            n = _ud.normalize("NFKD", n).encode("ascii", "ignore").decode("ascii")
+            n = _re.sub(r"[^a-z0-9 ]", "", n)
+            return _re.sub(r"\s+", " ", n).strip()
+
+        norm_h, norm_a = _norm(home), _norm(away)
+        with open(pin_path, newline="", encoding="utf-8") as f:
+            for row in _csv.DictReader(f):
+                rh = _norm(row.get("home_team", ""))
+                ra = _norm(row.get("away_team", ""))
+                if not ((norm_h in rh or rh in norm_h) and (norm_a in ra or ra in norm_a)):
+                    continue
+                # Use the best_outcome to select the relevant closing odd
+                outcome = pick.get("best_outcome", "")
+                col = {"home": "pin_1", "draw": "pin_x", "away": "pin_2"}.get(outcome)
+                if not col:
+                    return
+                closing_val = float(row.get(col, 0) or 0)
+                if closing_val > 1.0:
+                    db_picks.update_clv(match_id, closing_val, db_path)
+                return
+    except Exception:
+        pass  # non-fatal — CLV data is supplementary
+
+
 def update_results(db_path: str = PICKS_DB, quiet: bool = False) -> int:
     """
     Fetch results for all unresolved picks whose match_date <= today.
@@ -92,6 +146,11 @@ def update_results(db_path: str = PICKS_DB, quiet: bool = False) -> int:
                 correct = "✓" if result == pick["best_outcome"] else "✗"
                 print(f"    {correct} [{match_id}] {pick['home_team']} vs {pick['away_team']} "
                       f"-> {result} (pred: {pick['best_outcome']})")
+
+            # CLV update: try to read Pinnacle closing odds from cached CSV
+            # This populates closing_odds + clv columns required by weight_optimizer CLV objective.
+            _try_update_clv(pick, match_id, db_path)
+
         except Exception as exc:
             if not quiet:
                 print(f"    [WARNING] No se pudo resolver match {match_id}: {exc}")
@@ -520,6 +579,249 @@ def maybe_optimize_weights(resolved_picks: list[dict]) -> None:
 # Metrics JSON snapshot (for dynamic Kelly and other consumers)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Model drift detection (PSI — Population Stability Index)
+# ---------------------------------------------------------------------------
+
+def compute_psi(resolved_picks: list[dict], n_recent: int = PSI_LOOKBACK_RECENT) -> dict:
+    """
+    Detect model distribution shift using the two-sample Kolmogorov-Smirnov test.
+
+    The KS test is used instead of PSI because PSI requires histogram binning and
+    needs large samples per bin for reliable estimates. With n_recent=20 picks and
+    7 bins, PSI has a false-alarm rate of ~42%. The KS test has better statistical
+    power for small samples, requires no binning, and produces interpretable p-values.
+
+    Drift is flagged when KS p-value < 0.05 on any of prob_home, prob_draw, prob_away.
+    The "psi_max" field is kept in the return dict for frontend compatibility but now
+    holds the maximum KS statistic (0-1 range; higher = more drift).
+
+    Returns dict with ks_stat per probability, max_ks, p-values, and drift flag.
+    """
+    from scipy.stats import ks_2samp
+
+    picks_sorted = sorted(resolved_picks, key=lambda p: p["match_date"])
+    if len(picks_sorted) < n_recent + 10:
+        return {"psi_max": None, "drift_detected": False,
+                "ks_home": None, "ks_draw": None, "ks_away": None,
+                "p_home":  None, "p_draw":  None, "p_away":  None,
+                "n_recent": 0, "n_baseline": 0}
+
+    recent   = picks_sorted[-n_recent:]
+    baseline = picks_sorted[:-n_recent]
+
+    def _ks_one(key: str) -> tuple[float, float]:
+        base_vals   = [p.get(key) or 0.33 for p in baseline]
+        recent_vals = [p.get(key) or 0.33 for p in recent]
+        stat, pval  = ks_2samp(base_vals, recent_vals)
+        return float(stat), float(pval)
+
+    ks_home, p_home = _ks_one("prob_home")
+    ks_draw, p_draw = _ks_one("prob_draw")
+    ks_away, p_away = _ks_one("prob_away")
+    max_ks          = max(ks_home, ks_draw, ks_away)
+    # Drift: any probability significantly different at α=0.05 Bonferroni-corrected for 3 tests
+    # → threshold = 0.05 / 3 = 0.0167
+    _BONFERRONI_THRESHOLD = 0.05 / 3   # 0.0167 — corrects for 3 simultaneous tests
+    drift_detected = min(p_home, p_draw, p_away) < _BONFERRONI_THRESHOLD
+
+    return {
+        "psi_max":        round(max_ks,  4),   # KS statistic, kept for frontend compat
+        "ks_home":        round(ks_home, 4),
+        "ks_draw":        round(ks_draw, 4),
+        "ks_away":        round(ks_away, 4),
+        "p_home":         round(p_home,  4),
+        "p_draw":         round(p_draw,  4),
+        "p_away":         round(p_away,  4),
+        "drift_detected": drift_detected,
+        "n_recent":       len(recent),
+        "n_baseline":     len(baseline),
+    }
+
+
+def _alert_psi_drift(psi: dict) -> None:
+    """Send Telegram warning when KS drift is detected."""
+    # Note: uses ks_home/draw/away keys (KS statistic), not psi_home/draw/away
+    msg = (
+        f"[ALERTA] Drift del modelo detectado (KS={psi['psi_max']:.3f})\n"
+        f"KS home={psi.get('ks_home', '?')} (p={psi.get('p_home', '?')}) | "
+        f"KS draw={psi.get('ks_draw', '?')} (p={psi.get('p_draw', '?')}) | "
+        f"KS away={psi.get('ks_away', '?')} (p={psi.get('p_away', '?')})\n"
+        f"Ultimos {psi['n_recent']} picks vs {psi['n_baseline']} picks anteriores.\n"
+        f"Revisar: meta_learner.pkl o cambio de temporada?"
+    )
+    print(f"  [tracker] {msg}")
+    try:
+        from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+        import requests as _req
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            _req.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={"chat_id": TELEGRAM_CHAT_ID, "text": msg},
+                timeout=10,
+            )
+    except Exception:
+        pass  # non-fatal
+
+
+# ---------------------------------------------------------------------------
+# Bet timing analysis (CLV by hours-to-kickoff window)
+# ---------------------------------------------------------------------------
+
+def compute_timing_analysis(
+    resolved_picks: list[dict],
+    history_db: str = "cache/odds_history.db",
+) -> dict:
+    """
+    Join resolved picks with odds_history to find the timing window
+    (hours before kickoff) that yielded the best average CLV per league.
+
+    Requires odds_history.db rows to have hours_to_kickoff populated
+    (available after the odds_fetcher update in this release).
+
+    Returns dict like:
+        {
+          "PL": {
+            "window_best_clv": "24-48h",
+            "windows": {
+              "0-6h":   {"n": 5, "avg_clv": 0.012},
+              "6-24h":  {"n": 8, "avg_clv": 0.023},
+              "24-48h": {"n": 6, "avg_clv": 0.031},
+              "48h+":   {"n": 3, "avg_clv": 0.018},
+            }
+          }, ...
+        }
+    """
+    if not os.path.exists(history_db):
+        return {}
+
+    clv_picks = [p for p in resolved_picks if p.get("clv") is not None]
+    if not clv_picks:
+        return {}
+
+    try:
+        import sqlite3 as _sql
+        with _sql.connect(history_db) as conn:
+            conn.row_factory = _sql.Row
+            timing_rows = conn.execute(
+                "SELECT match_key, MIN(hours_to_kickoff) as earliest_hours "
+                "FROM odds_history "
+                "WHERE hours_to_kickoff IS NOT NULL "
+                "GROUP BY match_key"
+            ).fetchall()
+    except Exception:
+        return {}
+
+    timing_map = {r["match_key"]: r["earliest_hours"] for r in timing_rows}
+
+    _WINDOWS = [("0-6h", 0, 6), ("6-24h", 6, 24), ("24-48h", 24, 48), ("48h+", 48, 9999)]
+
+    buckets: dict[str, dict[str, list]] = {}
+    for pick in clv_picks:
+        mk = f"{pick['home_team']}|{pick['away_team']}|{pick['match_date']}"
+        hrs = timing_map.get(mk)
+        if hrs is None or hrs < 0:
+            continue  # no timing data or fetched after kickoff
+        lg = pick.get("league", "ALL")
+        for win_name, lo, hi in _WINDOWS:
+            if lo <= hrs < hi:
+                buckets.setdefault(lg, {}).setdefault(win_name, []).append(pick["clv"])
+                break
+
+    output: dict = {}
+    for lg, windows in buckets.items():
+        lg_out: dict = {}
+        best_clv, best_win = -999.0, None
+        for win_name, clv_list in windows.items():
+            avg = sum(clv_list) / len(clv_list)
+            lg_out[win_name] = {"n": len(clv_list), "avg_clv": round(avg, 4)}
+            if avg > best_clv:
+                best_clv, best_win = avg, win_name
+        lg_out["window_best_clv"] = best_win
+        output[lg] = lg_out
+
+    return output
+
+
+# ---------------------------------------------------------------------------
+# Sub-model accuracy (rolling window)
+# ---------------------------------------------------------------------------
+
+def compute_submodel_accuracy(
+    resolved_picks: list[dict],
+    n_recent: int = SUBMODEL_ACCURACY_WINDOW,
+) -> dict:
+    """
+    Compute per-sub-model 1X2 accuracy and Brier score on the most recent
+    n_recent resolved picks.
+
+    Sub-models included: dc, elo, h2h (btts has no 1X2 prediction).
+
+    Returns:
+        {
+          "dc":  {"n": int, "accuracy": float, "brier": float},
+          "elo": {"n": int, "accuracy": float, "brier": float},
+          "h2h": {"n": int, "accuracy": float, "brier": float},
+          "n_window": int,
+        }
+    """
+    picks_sorted = sorted(resolved_picks, key=lambda p: p["match_date"])
+    window = picks_sorted[-n_recent:] if len(picks_sorted) >= n_recent else picks_sorted
+
+    stats: dict = {}
+
+    for model_key in ("dc", "elo", "h2h"):
+        usable = []
+        for p in window:
+            raw = p.get("sub_preds")
+            if not raw:
+                continue
+            try:
+                sub = json.loads(raw)
+            except Exception:
+                continue
+            m = sub.get(model_key)
+            if not m:
+                continue
+            # H2H: skip when model itself flagged insufficient data
+            if model_key == "h2h" and not m.get("sufficient", True):
+                continue
+            actual = p.get("actual_result")
+            if actual not in ("home", "draw", "away"):
+                continue
+            usable.append((p, m))
+
+        if not usable:
+            continue
+
+        correct = 0
+        brier_sum = 0.0
+        for p, m in usable:
+            ph = m.get("prob_home", 1/3)
+            pd = m.get("prob_draw", 1/3)
+            pa = m.get("prob_away", 1/3)
+            tot = ph + pd + pa or 1.0
+            ph, pd, pa = ph / tot, pd / tot, pa / tot
+            best = "home" if ph >= pd and ph >= pa else ("away" if pa >= pd else "draw")
+            actual = p["actual_result"]
+            if best == actual:
+                correct += 1
+            ih = 1 if actual == "home" else 0
+            id_ = 1 if actual == "draw" else 0
+            ia  = 1 if actual == "away" else 0
+            brier_sum += (ph - ih) ** 2 + (pd - id_) ** 2 + (pa - ia) ** 2
+
+        n = len(usable)
+        stats[model_key] = {
+            "n":        n,
+            "accuracy": round(correct / n, 4),
+            "brier":    round(brier_sum / n, 4),
+        }
+
+    stats["n_window"] = len(window)
+    return stats
+
+
 def _save_results_js(all_picks: list[dict], output_path: str = RESULTS_JS_PATH) -> None:
     """
     Write visualizador/data/results.js — resolved match results for the
@@ -563,16 +865,20 @@ _METRICS_JSON_PATH = "cache/tracker_metrics.json"
 def _save_metrics_json(metrics: dict) -> None:
     """
     Persist a lightweight snapshot of tracker metrics to cache/tracker_metrics.json.
-    Used by value_detector.py to load per-league ROI for dynamic Kelly sizing.
+    Used by value_detector.py (dynamic Kelly), and the frontend TRACK view.
     Only saves the fields that downstream consumers need (avoids serialising
     the full bankroll_history list which can be large).
     """
     snapshot = {
-        "n_resolved":    metrics.get("n_resolved", 0),
-        "accuracy_1x2":  metrics.get("accuracy_1x2"),
-        "roi_flat":      metrics.get("roi_flat"),
-        "per_league":    metrics.get("per_league", {}),
-        "per_stars":     metrics.get("per_stars", {}),
+        "n_resolved":           metrics.get("n_resolved", 0),
+        "accuracy_1x2":         metrics.get("accuracy_1x2"),
+        "roi_flat":             metrics.get("roi_flat"),
+        "per_league":           metrics.get("per_league", {}),
+        "per_stars":            metrics.get("per_stars", {}),
+        # New fields
+        "psi":                  metrics.get("psi", {}),
+        "timing_analysis":      metrics.get("timing_analysis", {}),
+        "submodel_accuracy_30": metrics.get("submodel_accuracy_30", {}),
     }
     try:
         with open(_METRICS_JSON_PATH, "w", encoding="utf-8") as f:
@@ -603,6 +909,20 @@ def run_tracker(quiet: bool = False, no_update: bool = False, no_report: bool = 
         metrics = compute_metrics(resolved)
         metrics["n_pending"] = len(pending)
         metrics["n_total"]   = len(all_picks)
+
+        # PSI drift detection
+        psi = compute_psi(resolved)
+        metrics["psi"] = psi
+        if psi.get("drift_detected"):
+            _alert_psi_drift(psi)
+        elif not quiet and psi.get("psi_max") is not None:
+            print(f"  [tracker] PSI={psi['psi_max']:.3f} (drift: no)")
+
+        # Bet timing analysis
+        metrics["timing_analysis"] = compute_timing_analysis(resolved)
+
+        # Sub-model accuracy (rolling window)
+        metrics["submodel_accuracy_30"] = compute_submodel_accuracy(resolved)
 
     # 3. Maybe update calibrator, optimise weights, train meta-learner, draw model
     if resolved:

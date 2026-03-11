@@ -202,6 +202,9 @@ def predict_match(
     elo_away_ratings: dict | None = None,
     odds_age_hours: float | None = None,
     referee_name: str | None = None,
+    weather_impact: dict | None = None,
+    home_depth_impact: dict | None = None,
+    away_depth_impact: dict | None = None,
 ) -> dict:
     """
     Full prediction for one match.
@@ -290,8 +293,10 @@ def predict_match(
         ph, pd, pa = ml_result
     else:
         ph, pd, pa = _blend_1x2(dc_pred, elo_pred, form_pred, h2h_pred)
-        if _calib_params:
-            ph, pd, pa = _calibrator.apply_calibration(ph, pd, pa, _calib_params)
+        # NOTE: Platt calibrator is applied AFTER market blend (see below) because
+        # the calibrator was trained on the final post-blend probabilities stored in
+        # picks_history.db. Applying it before the blend would create a distribution
+        # mismatch between training and inference.
 
     # --- Expected goals (fatigue already baked in via DC) ---
     lam = dc_pred.get("lambda_", 1.3) if dc_pred else 1.3
@@ -301,6 +306,29 @@ def predict_match(
     motiv = _motivation.from_standings(home_pos, away_pos, league_code or "")
     lam = round(lam * motiv["home_mult"], 4)
     mu  = round(mu  * motiv["away_mult"], 4)
+
+    # --- Weather impact (symmetric: both teams affected by same conditions) ---
+    _weather = weather_impact or {}
+    if _weather.get("lam_mult", 1.0) != 1.0 or _weather.get("mu_mult", 1.0) != 1.0:
+        lam = round(lam * _weather.get("lam_mult", 1.0), 4)
+        mu  = round(mu  * _weather.get("mu_mult",  1.0), 4)
+
+    # --- Squad depth (asymmetric: squad_depth returns lam/mu from THAT TEAM's perspective) ---
+    # Semantic mapping to match/pitch perspective:
+    #   home_depth.lam_mult < 1  → home weak attack  → home scores less    → reduce lam
+    #   home_depth.mu_mult  > 1  → home weak defence → away scores more    → increase mu
+    #   away_depth.lam_mult < 1  → away weak attack  → away scores less    → reduce mu  (NOT lam)
+    #   away_depth.mu_mult  > 1  → away weak defence → home scores more    → increase lam (NOT mu)
+    _hd = home_depth_impact or {}
+    _ad = away_depth_impact or {}
+    if _hd.get("lam_mult", 1.0) != 1.0:
+        lam = round(lam * _hd.get("lam_mult", 1.0), 4)   # home weak attack → fewer home goals
+    if _hd.get("mu_mult", 1.0) != 1.0:
+        mu  = round(mu  * _hd.get("mu_mult",  1.0), 4)   # home weak defence → more away goals
+    if _ad.get("lam_mult", 1.0) != 1.0:
+        mu  = round(mu  * _ad.get("lam_mult", 1.0), 4)   # away weak attack → fewer away goals (mu)
+    if _ad.get("mu_mult", 1.0) != 1.0:
+        lam = round(lam * _ad.get("mu_mult",  1.0), 4)   # away weak defence → more home goals (lam)
 
     # --- Draw adjustment ---
     # When draw_model is trained: replace hand-tuned nudge with learned probabilities.
@@ -397,6 +425,29 @@ def predict_match(
                 market_blend_applied = True
         except (KeyError, ZeroDivisionError):
             pass
+
+    # --- Weather draw boost (applied after market blend, before Platt) ---
+    # When adverse weather reduces goals, draws become more likely.
+    # Addend is small (max 0.04) and redistributed from home/away proportionally.
+    _draw_boost = _weather.get("draw_boost", 0.0)
+    if _draw_boost > 1e-4 and ml_result is None:
+        _adj = _draw_boost
+        pd_new = min(0.45, pd + _adj)
+        actual_adj = pd_new - pd
+        if abs(actual_adj) > 1e-9:
+            _denom = ph + pa + 1e-9
+            ph = max(0.0, ph - actual_adj * ph / _denom)
+            pa = max(0.0, pa - actual_adj * pa / _denom)
+            pd = pd_new
+            _t = ph + pd + pa
+            ph, pd, pa = ph / _t, pd / _t, pa / _t
+
+    # --- Platt calibration (after market blend — correct distribution match) ---
+    # Applied here so the calibrator sees the same probability distribution it was
+    # trained on (picks_history.db stores the final post-blend values).
+    # Skipped when meta_learner is active (already calibrated internally).
+    if ml_result is None and _calib_params:
+        ph, pd, pa = _calibrator.apply_calibration(ph, pd, pa, _calib_params)
 
     # --- Referee adjustment (small home/away bias correction) ---
     _ref_profiles = _referee.load_profiles()
@@ -516,6 +567,9 @@ def predict_match(
                 away_pos   = away_pos,
             ) + motiv["tags"]
         ),
+        "weather":          _weather if _weather.get("notes") else {},
+        "home_squad_depth": _hd if _hd.get("notes") else {},
+        "away_squad_depth": _ad if _ad.get("notes") else {},
     }
 
 

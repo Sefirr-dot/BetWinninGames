@@ -99,7 +99,7 @@ def train(db_path: str) -> str:
             ctx      = sp.get("context") or {}
             mkt_draw = float(ctx.get("mkt_px") or 0.0)
             X_rows.append(_fv(dc_draw, elo_draw, h2h_draw, mkt_draw))
-            y_rows.append(1.0 if actual_result == "D" else 0.0)
+            y_rows.append(1.0 if actual_result == "draw" else 0.0)
         except (json.JSONDecodeError, TypeError, ValueError):
             continue
 

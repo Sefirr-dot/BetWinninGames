@@ -19,6 +19,8 @@ import os
 import re
 import unicodedata
 
+from collections import defaultdict
+
 from config import (ODDS_DIR, VALUE_BET_EDGE_THRESHOLD, VALUE_BET_EDGE_STEP,
                     VALUE_BET_MIN_STARS, VALUE_BET_MIN_STARS_BY_LEAGUE,
                     VALUE_BET_EDGE_THRESHOLD_BY_LEAGUE,
@@ -237,6 +239,113 @@ def get_match_odds(home: str, away: str, odds_map: dict) -> dict | None:
     return _match_odds(home, away, odds_map)
 
 
+# ---------------------------------------------------------------------------
+# Market Inefficiency Score (MIS)
+# ---------------------------------------------------------------------------
+
+# Static correlation table for same-match outcome pairs.
+# Based on football analytics: home win and away win are near-mutually-exclusive;
+# home/away win and over 2.5 are positively correlated (decisive wins tend to be high-scoring).
+_OUTCOME_CORRELATION: dict[tuple[str, str], float] = {
+    ("home",   "away"):   -0.90,
+    ("home",   "draw"):   -0.70,
+    ("draw",   "away"):   -0.70,
+    ("home",   "over25"):  0.30,
+    ("away",   "over25"):  0.25,
+    ("home",   "btts"):    0.15,
+    ("away",   "btts"):    0.15,
+    ("over25", "btts"):    0.55,
+    ("draw",   "over25"): -0.20,
+    ("draw",   "btts"):    0.10,
+}
+
+
+def _get_corr(a: str, b: str) -> float:
+    """
+    Look up SIGNED correlation between two outcomes (symmetric).
+
+    Returns the signed correlation, NOT abs(). Negative correlations (e.g.
+    home+away = -0.90) mean the outcomes tend not to co-occur — they act as a
+    partial hedge, so no Kelly discount is warranted. The discount formula in
+    _corr_discount clamps negative correlations to 0 (no discount).
+
+    Only positive correlations (e.g. over25+btts = +0.55) warrant a Kelly reduction
+    because both bets tend to win/lose together, amplifying portfolio variance.
+    """
+    return _OUTCOME_CORRELATION.get((a, b), _OUTCOME_CORRELATION.get((b, a), 0.0))
+
+
+def _corr_discount(n_correlated: int, max_corr: float) -> float:
+    """
+    Kelly discount factor when multiple bets are on the same match.
+
+    Only positive correlations increase portfolio variance and warrant a discount.
+    Negative correlations (partial hedges) get no discount (clamped to 0).
+
+    Formula: 1 / (1 + (n-1) * max(0, corr)) — derived from Thorp (1997) Kelly
+    extension for correlated bets.
+
+    Returns multiplier in [0.30, 1.0]:
+      1 bet          → 1.0   (no discount)
+      2, corr=0.0   → 1.0   (independent or negative — no discount)
+      2, corr=+0.55 → 0.65  (over25 + btts)
+      2, corr=+0.30 → 0.77  (home win + over25)
+    """
+    if n_correlated <= 1:
+        return 1.0
+    # Clamp to 0: negative correlations never warrant a Kelly reduction
+    effective_corr = max(0.0, max_corr)
+    if effective_corr < 0.01:
+        return 1.0
+    return max(0.30, 1.0 / (1.0 + (n_correlated - 1) * effective_corr))
+
+
+def compute_mis(
+    effective_edge: float,
+    sharp_money: bool,
+    odds_age_hours: float | None,
+    clv_vs_pinnacle: float | None,
+    bk_odds: float = 2.0,
+) -> float:
+    """
+    Market Inefficiency Score — composite signal in [0.25, 1.50].
+
+    Higher MIS = stronger evidence that the edge is real and the market is soft.
+    Used to scale the Kelly fraction: kelly_final = kelly_base * MIS.
+
+    Components
+    ----------
+    edge_magnitude  : normalised to 20% edge = full +0.25 contribution
+    sharp_money     : odds shortened 10%+ on our outcome → +0.10
+    stale_odds      : older than 6h → -0.15, older than 2h → -0.07
+    clv_vs_pinnacle : positive CLV vs sharp closing line → up to +0.10
+
+    Baseline of 0.50 ensures we never reduce Kelly to zero from MIS alone.
+    """
+    score = 0.50
+
+    # 1. Edge magnitude (bounded: 20% edge = maximum contribution of +0.25)
+    score += 0.25 * min(1.0, effective_edge / 0.20)
+
+    # 2. Sharp money confirmation
+    if sharp_money:
+        score += 0.10
+
+    # 3. Stale odds penalty (market may have moved without our data updating)
+    if odds_age_hours is not None:
+        if odds_age_hours > 6:
+            score -= 0.15
+        elif odds_age_hours > 2:
+            score -= 0.07
+
+    # 4. CLV vs Pinnacle (positive = we predicted better than the sharpest closing line)
+    if clv_vs_pinnacle is not None:
+        # ±10% CLV maps to ±0.10 contribution; clamped at ±0.10
+        score += 0.10 * max(-1.0, min(1.0, clv_vs_pinnacle / 0.10))
+
+    return round(max(0.25, min(1.50, score)), 3)
+
+
 def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
     """
     Identify value bets where model probability exceeds bookmaker implied
@@ -315,6 +424,18 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
         except (KeyError, ZeroDivisionError):
             pass
 
+        # Fetch odds age for MIS staleness penalty
+        _odds_age = None
+        try:
+            from odds_fetcher import get_odds_age_hours
+            _odds_age = get_odds_age_hours(home_name, away_name, match_date)
+        except Exception:
+            pass
+
+        # Extract sub-model probs for sharpness agreement scoring
+        _dc_sub  = pred.get("dc")  or {}
+        _elo_sub = pred.get("elo") or {}
+
         for outcome, model_prob, bk_odds in checks:
             if bk_odds <= VALUE_BET_MIN_ODDS:
                 continue  # market too efficient at short odds — skip
@@ -333,13 +454,50 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
             effective_edge = edge + (0.02 if sharp_money else 0.0) + _squeeze_bonus
 
             if effective_edge >= effective_threshold:
-                kelly = _kelly_fraction(effective_edge, bk_odds, stars, league)
-
                 # CLV vs Pinnacle: positive = we predicted better than sharp closing line
                 _pin_key = {"home": "home", "draw": "draw", "away": "away"}.get(outcome)
                 pin_prob = (pinnacle_implied.get(_pin_key)
                             if pinnacle_implied and _pin_key else None)
                 clv_vs_pinnacle = round(model_prob - pin_prob, 4) if pin_prob else None
+
+                # Market Inefficiency Score — scales Kelly fraction
+                mis = compute_mis(
+                    effective_edge  = effective_edge,
+                    sharp_money     = sharp_money,
+                    odds_age_hours  = _odds_age,
+                    clv_vs_pinnacle = clv_vs_pinnacle,
+                    bk_odds         = bk_odds,
+                )
+
+                kelly_base = _kelly_fraction(effective_edge, bk_odds, stars, league)
+                # Hard cap 25% is enforced AFTER MIS scaling (not inside _kelly_fraction)
+                kelly = round(min(kelly_base * mis, 0.25), 5)
+
+                # Sharpness Score — composite market intelligence signal (0-100)
+                _dc_prob_out  = {
+                    "home": _dc_sub.get("prob_home"),
+                    "draw": _dc_sub.get("prob_draw"),
+                    "away": _dc_sub.get("prob_away"),
+                }.get(outcome)
+                _elo_prob_out = {
+                    "home": _elo_sub.get("prob_home"),
+                    "draw": _elo_sub.get("prob_draw"),
+                    "away": _elo_sub.get("prob_away"),
+                }.get(outcome)
+                try:
+                    from algorithms.sharpness import compute_sharpness_score
+                    _sharpness = compute_sharpness_score(
+                        edge            = effective_edge,
+                        sharp_money     = sharp_money,
+                        clv_vs_pinnacle = clv_vs_pinnacle,
+                        odds_movement   = mv_ratio if movement and _outcome_mv_key else None,
+                        mis             = mis,
+                        dc_prob         = _dc_prob_out,
+                        elo_prob        = _elo_prob_out,
+                        model_prob      = model_prob,
+                    )
+                except Exception:
+                    _sharpness = 0
 
                 value_bets.append({
                     "match":           f"{home_name} vs {away_name}",
@@ -350,6 +508,8 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
                     "edge":            effective_edge,
                     "bk_odds":         bk_odds,
                     "kelly_fraction":  kelly,
+                    "kelly_base":      kelly_base,
+                    "market_inefficiency_score": mis,
                     "home_name":       home_name,
                     "away_name":       away_name,
                     "odds_movement":   mv_ratio if movement and _outcome_mv_key else None,
@@ -357,6 +517,27 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
                     "antidraw_squeeze":  round(_squeeze_bonus * 100, 1) if _squeeze_bonus else None,
                     "pinnacle_prob":     pin_prob,
                     "clv_vs_pinnacle":   clv_vs_pinnacle,
+                    "corr_discount":     1.0,  # filled by post-processing below
+                    "sharpness_score":   _sharpness,
+                    "match_date":        match_date,
                 })
+
+    # ── Post-process: apply correlation discounts to same-match bet groups ──
+    match_groups: dict[tuple, list] = defaultdict(list)
+    for vb in value_bets:
+        match_groups[(vb["home_name"], vb["away_name"])].append(vb)
+
+    for group in match_groups.values():
+        if len(group) < 2:
+            continue
+        # Find the maximum pairwise correlation in this group
+        max_corr = 0.0
+        for i, a in enumerate(group):
+            for b in group[i + 1:]:
+                max_corr = max(max_corr, _get_corr(a["outcome"], b["outcome"]))
+        disc = _corr_discount(len(group), max_corr)
+        for vb in group:
+            vb["kelly_fraction"] = round(vb["kelly_fraction"] * disc, 5)
+            vb["corr_discount"]  = round(disc, 3)
 
     return sorted(value_bets, key=lambda x: x["edge"], reverse=True)

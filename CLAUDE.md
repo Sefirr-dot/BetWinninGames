@@ -109,7 +109,7 @@ All keys live in `config.py` (gitignored — copy from `config.example.py`):
 | `h2h` | 5% | Time-decayed (`H2H_YEARLY_DECAY=0.70`). Only applied when `n_h2h >= H2H_MIN_MATCHES`. |
 | `btts` | 5% | Poisson exact blended with per-league BTTS prior (`BTTS_PRIOR_BLEND=0.25`, `BTTS_RATE_BY_LEAGUE`). Accepts `league_code` param. |
 | `corners` | 5% | Proxy driven by λ/μ. |
-| `simulate` | n/a | Monte Carlo (50k sims, vectorized numpy) for secondary markets: Over 1.5/3.5/4.5, BTTS+Over, Asian HCap ±0.5/±1. Called after DC to compute `mc` dict. |
+| `simulate` | n/a | Monte Carlo (50k sims, vectorized numpy) for secondary markets: Over 1.5/3.5/4.5, BTTS+Over, Asian HCap ±0.5/±1/**quarter-ball** (±0.25/±0.75/±1.25). Quarter-ball uses `_quarter_ah` (half WIN) or `_quarter_ah_half_loss` (half LOSS) depending on which bracket pushes. |
 | `motivation` | n/a | Adjusts λ/μ ±8% based on table position. `from_standings(home_pos, away_pos, league_code)` → multipliers + tags (`six_pointer`, `dead_rubber`, `must_win`). |
 | `referee` | n/a | Referee profiles built from fdco data. `get_adjustments(referee, league)` → home_bias correction (±3% on ph/pa) + expected cards. Profiles cached in `cache/referee_stats.json`. |
 | `lineup_impact` | n/a | Fetches confirmed lineups from football-data.org when kickoff < 3h. Estimates positional absence impact on λ/μ. |
@@ -119,6 +119,10 @@ All keys live in `config.py` (gitignored — copy from `config.example.py`):
 | `draw_model` | n/a | Logistic regression + **L2=0.01** draw classifier. Features: `dc_draw`, `elo_draw`, `h2h_draw`, `mkt_draw`. **Replaces** the hand-tuned draw nudge in ensemble when `cache/draw_model.json` exists. L2 acts as implicit pick filter — shrinks feature weights toward zero, outputting ~24% draw constant, which concentrates 5★ picks on clearest home/away wins (+6.6pp ROI gain). Pre-trains from backtest automatically; fine-tunes on live picks (≥50) via tracker. `source` field: `backtest_pretrain` vs `live`. |
 | `over25_model` | n/a | Logistic regression + **L2=0.01** calibrator for Over 2.5. Features: `mc_over25` (MC raw), `lam+mu`, `btts_prob`. After L2, `lam+mu` dominates over raw MC. **Replaces** raw `mc["over25"]` output when `cache/over25_model.json` exists. Same source-guard pattern as draw_model. |
 | `match_context` | n/a | `classify(elo_pred, form_pred, h2h_pred, home_pos, away_pos)` → tags list. Tags: `even_match`, `top6_clash`, `relegation_6ptr`, `home_in_form`, `away_in_form`, `h2h_dominant`. Combined with `motivation` tags in `_tags`. |
+| `weather_model` | n/a | Converts Open-Meteo weather to λ/μ multipliers. Wind >55km/h → -8% goals. Rain >5mm/h → -7% goals. Temp <0°C → -3%. Max cap: -12% goals + +4pp draw_boost. `weather_fetcher.py` fetches from Open-Meteo (free, no key). Stadium coords for ~80 teams in `STADIUM_COORDS`. Cached 3h. |
+| `squad_depth` | n/a | Estimates λ/μ impact from player availability via `/teams/{id}/persons` (football-data.org TIER_TWO — returns None on free tier, silently skipped). Missing attackers reduce λ, missing defenders increase μ. Cached 12h in `cache/squad_depth/`. |
+| `sharpness` | n/a | `compute_sharpness_score()` → int 0-100. Components: CLV vs Pinnacle (25pts) + steam/movement (25pts, bug-fixed: capped per-component not total) + edge magnitude (25pts) + model agreement+MIS (25pts). Exposed as `sharpness_score` on each value_bet dict. |
+| `portfolio` | n/a | Markowitz QP optimizer using `scipy.optimize.minimize(SLSQP)`. `optimize_portfolio(value_bets)` → optimal stake fractions. `simulate_weekend_pnl()` → Monte Carlo P5/P50/P95 distribution. Correlation matrix from same-match + cross-league/day heuristics. `kelly_portfolio` field added to each value_bet. |
 
 ### Calibrator and weight optimizer (auto-loading)
 
@@ -126,7 +130,9 @@ Loaded at `ensemble.py` import time:
 - `cache/calibrator.json` → Platt scaling post-blend (requires ≥200 resolved picks).
 - `cache/model_weights.json` → overrides `MODEL_WEIGHTS` for DC/Elo (Form fixed at 0). Requires ≥50 resolved picks.
 
-`weight_optimizer.py` now optimises **only DC and Elo** (Form permanently excluded). Both are safe to train from backtest seeds.
+`weight_optimizer.py` optimises **only DC and Elo** (Form permanently excluded). Primary objective: **CLV vs Pinnacle** (`WEIGHT_OPTIMIZER_OBJECTIVE="clv"`). Falls back to Brier when fewer than `CLV_OPTIMIZER_MIN_SAMPLES=30` picks have `closing_odds` populated. **Important**: `closing_odds` is populated by `_try_update_clv()` in tracker.py reading from `cache/pinnacle/YYYY-MM-DD.csv` after each resolved pick. The CLV objective uses `np.argmax(blend)` dynamically (not the historical `best_outcome` label) to avoid circular bias.
+
+**Platt calibrator order (v7 fix):** Applied AFTER market blend in `ensemble.py` (not before). This matches the distribution it was trained on (picks_history.db stores post-blend probabilities).
 
 **meta_learner WARNING**: If predictions look wrong after `--seed-db`, delete `cache/meta_learner.pkl`. Distribution shift from historical seeds degrades current-season predictions.
 
@@ -291,10 +297,36 @@ After L2, lam+mu becomes the dominant feature (more stable than raw MC over25).
 ### Anti-draw squeeze
 `value_detector.find_edges()` computes `mkt_draw_clean - model_draw`. If gap > `ANTIDRAW_SQUEEZE_THRESHOLD` (5%), home/away bets for that match get up to `ANTIDRAW_EDGE_BONUS_MAX` (4%) added to effective edge. Only applies to home/away outcomes, not draw/over25/btts. Exposed as `antidraw_squeeze` field in value bet dicts.
 
-### Live pick counts (as of v5.0)
+### v7 new modules (2026-03-11)
+
+**Critical bug fixes applied in v7:**
+- `draw_model.py`: target label was `"D"` (always False) → fixed to `"draw"`. Delete `cache/draw_model.json` and retrain if upgrading.
+- `over25_model.py`: `lam+mu` normalized by `_LAM_MU_NORM=3.0` — invalidates existing model. Delete and retrain.
+- `simulate.py`: quarter AH effective formula — `_quarter_ah_half_loss()` (push = half LOSS) vs `_quarter_ah()` (push = half WIN). Affects AH -0.25, -1.25 home and AH +0.75 away.
+- `ensemble.py`: `away_depth_impact` lam/mu was swapped — away weak attack → reduce μ, away weak defence → increase λ.
+- `ensemble.py`: Platt calibrator now applied AFTER market blend (correct distribution match).
+- `tracker.py`: drift alert fixed to use `ks_home/draw/away` keys (KS test replaced PSI).
+- `value_detector.py`: Kelly hard cap `min(kelly_base * mis, 0.25)` enforced after MIS scaling.
+- `sharpness.py`: `movement_pts = min(10.0, ...)` (was no-op identity min).
+
+**New config knobs:** `WEIGHT_OPTIMIZER_OBJECTIVE="clv"`, `CLV_OPTIMIZER_MIN_SAMPLES=30`, `PSI_ALERT_THRESHOLD=0.2`, `PSI_LOOKBACK_RECENT=20`, `SUBMODEL_ACCURACY_WINDOW=30`.
+
+**New value_bet fields:** `sharpness_score` (0-100), `mis`, `corr_discount`, `kelly_portfolio`, `match_date`.
+
+**New sub-models/modules:**
+- `weather_fetcher.py` + `algorithms/weather_model.py` — Open-Meteo API (free), stadium coords for ~80 teams, cached 3h.
+- `algorithms/squad_depth.py` — `/teams/{id}/persons` API (TIER_TWO only, silently skipped on free tier), cached 12h.
+- `algorithms/sharpness.py` — Sharpness Score 0-100 per value_bet.
+- `algorithms/portfolio.py` — Markowitz QP (SLSQP), `kelly_portfolio` field, MC P&L distribution.
+
+**Drift detection:** KS 2-sample test (Bonferroni α=0.0167) replaces PSI in `compute_psi()`.
+
+**CLV pipeline active:** `_try_update_clv()` reads `cache/pinnacle/YYYY-MM-DD.csv` post-resolution → populates `closing_odds`/`clv` → enables CLV optimizer objective.
+
+### Live pick counts (as of v7.0)
 75 live picks total, ~40 resolved. Models requiring live data:
 - `draw_model` / `over25_model`: need ≥50 resolved → **active** (pretrained from backtest, L2=0.01)
-- `model_weights` optimizer: needs ≥50 resolved → **activating soon**
+- `model_weights` optimizer: needs ≥50 resolved → **activating soon** (objective: CLV vs Pinnacle)
 - `calibrator` / `meta_learner`: need ≥200 resolved → **inactive**
 
 ### Security

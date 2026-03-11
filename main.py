@@ -93,6 +93,8 @@ def predict_for_date(
     standings_map: dict | None = None,
     elo_home_ratings: dict | None = None,
     elo_away_ratings: dict | None = None,
+    enable_weather: bool = True,
+    enable_squad_depth: bool = True,
 ) -> list[dict]:
     """Fetch matches for one date and run the ensemble. Returns ranked predictions."""
     matches = fetcher.get_matches_for_date(target_date, league)
@@ -110,6 +112,23 @@ def predict_for_date(
     _csv_path = _os.path.join(_ODDS_DIR, f"{target_date}.csv")
     odds_age_hours = (_time.time() - _os.path.getmtime(_csv_path)) / 3600 if _os.path.exists(_csv_path) else None
 
+    # Import new models (lazy, so they don't fail if not installed)
+    _weather_fetcher = None
+    _weather_model   = None
+    if enable_weather:
+        try:
+            import weather_fetcher as _weather_fetcher
+            from algorithms import weather_model as _weather_model
+        except ImportError:
+            pass
+
+    _squad_depth_module = None
+    if enable_squad_depth:
+        try:
+            from algorithms import squad_depth as _squad_depth_module
+        except ImportError:
+            pass
+
     predictions = []
     for match in matches:
         status = match.get("status", "")
@@ -126,6 +145,39 @@ def predict_for_date(
             match_odds = value_detector.get_match_odds(home_name, away_name, odds_map)
             referee_name = match.get("_referee")
 
+            # Weather impact (fetched from Open-Meteo, cached 3h)
+            weather_impact = None
+            if _weather_fetcher and _weather_model:
+                try:
+                    raw_weather = _weather_fetcher.fetch_weather_for_match(match)
+                    weather_impact = _weather_model.compute_weather_impact(raw_weather)
+                    if weather_impact and weather_impact.get("notes"):
+                        print(f"    [weather] {home_name} vs {away_name}: "
+                              f"{', '.join(weather_impact['notes'])}")
+                except Exception:
+                    weather_impact = None
+
+            # Squad depth impact (uses /teams/{id}/persons, cached 12h)
+            home_depth_impact = None
+            away_depth_impact = None
+            if _squad_depth_module:
+                try:
+                    home_depth_data = _squad_depth_module.fetch_squad_depth(home_id)
+                    home_depth_impact = _squad_depth_module.estimate_depth_impact(home_depth_data)
+                    if home_depth_impact and home_depth_impact.get("notes"):
+                        print(f"    [squad] {home_name}: "
+                              f"{', '.join(home_depth_impact['notes'][:2])}")
+                except Exception:
+                    home_depth_impact = None
+                try:
+                    away_depth_data = _squad_depth_module.fetch_squad_depth(away_id)
+                    away_depth_impact = _squad_depth_module.estimate_depth_impact(away_depth_data)
+                    if away_depth_impact and away_depth_impact.get("notes"):
+                        print(f"    [squad] {away_name}: "
+                              f"{', '.join(away_depth_impact['notes'][:2])}")
+                except Exception:
+                    away_depth_impact = None
+
             # Lineup impact — only when match kicks off within 3 hours
             lineup_impact = None
             try:
@@ -137,7 +189,12 @@ def predict_for_date(
                     match_id_val = match.get("id")
                     if match_id_val:
                         lu = fetch_lineup(match_id_val)
-                        lineup_impact = estimate_impact(lu)
+                        lineup_impact = estimate_impact(
+                            lu,
+                            home_team=home_name,
+                            away_team=away_name,
+                            league=league_code or "",
+                        )
                         if lineup_impact and lineup_impact.get("notes"):
                             print(f"    [lineup] {home_name} vs {away_name}: {', '.join(lineup_impact['notes'])}")
             except Exception:
@@ -153,6 +210,9 @@ def predict_for_date(
                 elo_away_ratings=elo_away_ratings,
                 odds_age_hours=odds_age_hours,
                 referee_name=referee_name,
+                weather_impact=weather_impact,
+                home_depth_impact=home_depth_impact,
+                away_depth_impact=away_depth_impact,
             )
             predictions.append({"match_info": match, "prediction": pred})
         except Exception as e:
@@ -294,6 +354,24 @@ def main():
 
         odds_map   = value_detector.load_odds_csv(date_str)
         value_bets = value_detector.find_edges(predictions, odds_map)
+
+        # Portfolio optimizer: apply Markowitz-optimal stake fractions to value bets
+        if value_bets:
+            try:
+                from algorithms.portfolio import optimize_portfolio, apply_portfolio_stakes, simulate_weekend_pnl
+                port = optimize_portfolio(value_bets)
+                value_bets = apply_portfolio_stakes(value_bets, port)
+                pnl_dist = simulate_weekend_pnl(value_bets, port)
+                if not getattr(predict_for_date, "_portfolio_printed", False):
+                    print(f"  [portfolio] {port['n_bets']} apuestas | "
+                          f"EV={port['portfolio_ev']*100:.1f}% | "
+                          f"Vol={port['portfolio_vol']*100:.1f}% | "
+                          f"Sharpe={port['portfolio_sharpe']:.2f} | "
+                          f"Kelly reduccion={port['kelly_reduction']:.2f}x")
+            except Exception as _pe:
+                port = {}
+                pnl_dist = {}
+
         all_data[date_str] = {"predictions": predictions, "value_bets": value_bets}
         print_day_summary(date_str, predictions)
 
