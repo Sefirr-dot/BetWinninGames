@@ -1484,13 +1484,18 @@ select.sort-select:focus { border-color: #3d6090; }
   </div>
 </div>
 
-<script src="data/predictions.js"></script>
-<script>window.TRACKER_PICKS=[];window.TRACKER_METRICS=null;</script>
-<script src="data/tracker_data.js"></script>
-<script>if (typeof BACKTEST_DATA === 'undefined') window.BACKTEST_DATA = null;</script>
-<script src="data/backtest_data.js"></script>
-<script>if (typeof RESOLVED_RESULTS === 'undefined') window.RESOLVED_RESULTS = {};</script>
-<script src="data/results.js"></script>
+<script>
+// Cache-bust síncrono: document.write bloquea igual que <script src> normal
+// Cada carga genera URLs únicas → el navegador nunca sirve datos obsoletos
+var _cbv = '?v=' + Date.now();
+document.write('<scr'+'ipt src="data/predictions.js'  + _cbv + '"><\/scr'+'ipt>');
+document.write('<scr'+'ipt>window.TRACKER_PICKS=[];window.TRACKER_METRICS=null;<\/scr'+'ipt>');
+document.write('<scr'+'ipt src="data/tracker_data.js' + _cbv + '"><\/scr'+'ipt>');
+document.write('<scr'+'ipt>if(typeof BACKTEST_DATA==="undefined")window.BACKTEST_DATA=null;<\/scr'+'ipt>');
+document.write('<scr'+'ipt src="data/backtest_data.js'+ _cbv + '"><\/scr'+'ipt>');
+document.write('<scr'+'ipt>if(typeof RESOLVED_RESULTS==="undefined")window.RESOLVED_RESULTS={};<\/scr'+'ipt>');
+document.write('<scr'+'ipt src="data/results.js'      + _cbv + '"><\/scr'+'ipt>');
+</script>
 <script>
 // ── AUTO-RELOAD: detecta cambios en predictions.js y recarga ──
 (function() {
