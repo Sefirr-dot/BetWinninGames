@@ -1492,6 +1492,24 @@ select.sort-select:focus { border-color: #3d6090; }
 <script>if (typeof RESOLVED_RESULTS === 'undefined') window.RESOLVED_RESULTS = {};</script>
 <script src="data/results.js"></script>
 <script>
+// ── AUTO-RELOAD: detecta cambios en predictions.js y recarga ──
+(function() {
+  let _lastEtag = null;
+  function _checkReload() {
+    fetch('data/predictions.js', { method: 'HEAD', cache: 'no-store' })
+      .then(r => {
+        const tag = r.headers.get('etag') || r.headers.get('last-modified') || r.headers.get('content-length');
+        if (_lastEtag === null) { _lastEtag = tag; return; }
+        if (tag && tag !== _lastEtag) { location.reload(); }
+      })
+      .catch(() => {});
+  }
+  // Poll every 15 seconds
+  setInterval(_checkReload, 15000);
+  _checkReload();
+})();
+</script>
+<script>
 // ── LANGUAGE ──
 const LANG = navigator.language.toLowerCase().startsWith('es') ? 'es' : 'en';
 const T = {
