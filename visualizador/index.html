@@ -1319,7 +1319,6 @@ select.sort-select:focus { border-color: #3d6090; }
     <span class="legend-sep">·</span>
     <span class="legend-item"><span class="league-badge badge-PD">PD</span>La Liga — España</span>
     <span class="legend-sep">·</span>
-    <span class="legend-item"><span class="league-badge badge-SA">SA</span>Serie A — Italia</span>
     <span class="legend-sep">·</span>
     <span class="legend-item"><span class="league-badge badge-BL1">BL1</span>Bundesliga — Alemania</span>
     <span class="legend-sep">·</span>
@@ -1754,7 +1753,7 @@ function buildSidebar() {
 // ── BUILD LEAGUE CHIPS ──
 function buildLeagueChips() {
   const container = document.getElementById('league-chips');
-  const leagues = ['ALL', 'PL', 'PD', 'SA', 'BL1', 'FL1'];
+  const leagues = ['ALL', 'PL', 'PD', 'BL1', 'FL1'];
   container.innerHTML = '';
   leagues.forEach(lg => {
     const chip = document.createElement('button');
@@ -4125,7 +4124,7 @@ function renderSlipView() {
       <span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:var(--accent-yellow)">€${inPlay.toFixed(2)}</span>
     </div>
     <div style="margin-left:auto;display:flex;gap:8px">
-      <button onclick="resetBankroll()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 12px;color:var(--muted);cursor:pointer;font-size:12px">_t('btn_reset')</button>
+      <button onclick="resetBankroll()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 12px;color:var(--muted);cursor:pointer;font-size:12px">${_t('btn_reset')}</button>
       ${!brl ? `<button onclick="document.getElementById('bankroll-modal').style.display='flex'" style="background:var(--accent-green);border:none;border-radius:6px;padding:6px 14px;color:#000;cursor:pointer;font-size:12px;font-weight:700">Configurar bankroll</button>` : ''}
     </div>
   </div>`;
@@ -4152,7 +4151,7 @@ function renderSlipView() {
       body = `<div class="slip-body" style="text-align:center;padding:60px 24px">
         <div style="font-size:36px;margin-bottom:12px">🎯</div>
         <div style="color:var(--muted);font-size:14px">Tu slip está vacío.<br>Añade picks desde las predicciones del día.</div>
-        <button onclick="activeDate=DATES[0]||'ALL';render()" style="margin-top:20px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 22px;color:var(--text);cursor:pointer;font-size:14px">_t('btn_view_pred')</button>
+        <button onclick="activeDate=DATES[0]||'ALL';render()" style="margin-top:20px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 22px;color:var(--text);cursor:pointer;font-size:14px">${_t('btn_view_pred')}</button>
       </div>`;
     } else {
       const total  = slip.reduce((s,b) => s+parseFloat(b.stake||0), 0);
@@ -4212,9 +4211,9 @@ function renderSlipView() {
         <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
           <button id="ollama-risk-btn" onclick="analyzeRiskWithOllama()"
             style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 18px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">
-            _t('btn_ollama')
+            ${_t('btn_ollama')}
           </button>
-          <button class="slip-cta" onclick="placeBets()" ${!brl?'disabled':''}>_t('btn_place')</button>
+          <button class="slip-cta" onclick="placeBets()" ${!brl?'disabled':''}>${_t('btn_place')}</button>
         </div>
       </div>
       <div id="ollama-risk-box" class="ollama-box" style="display:${document.getElementById('ollama-risk-box')?.innerHTML?'block':'none'};margin:0 24px 16px"></div>`;
@@ -4240,7 +4239,7 @@ function renderSlipView() {
       const range  = maxBrl - minBrl || 1;
       const sparkline = curve.length > 1 ? `
         <div style="margin:0 24px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 16px">
-          <div style="color:var(--muted);font-size:11px;margin-bottom:8px">_t('sec_bankroll_curve')</div>
+          <div style="color:var(--muted);font-size:11px;margin-bottom:8px">${_t('sec_bankroll_curve')}</div>
           <div style="display:flex;align-items:flex-end;gap:3px;height:40px">
             ${curve.map(v => {
               const h = Math.max(4, Math.round(((v-minBrl)/range)*36));
@@ -4509,9 +4508,9 @@ function renderSlipView() {
           <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
             <button id="ollama-risk-btn" onclick="analyzeRiskWithOllama()"
               style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 18px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">
-              _t('btn_ollama')
+              ${_t('btn_ollama')}
             </button>
-            <button class="slip-cta" onclick="placeCombinada()" ${!brl?'disabled':''}>_t('btn_place_comb')</button>
+            <button class="slip-cta" onclick="placeCombinada()" ${!brl?'disabled':''}>${_t('btn_place_comb')}</button>
           </div>
         </div>
         <div id="ollama-risk-box" class="ollama-box" style="display:none;margin:12px 0 0"></div>
