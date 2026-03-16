@@ -3096,6 +3096,7 @@ function renderBetNowView() {
             <div>
               <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Cuota mercado</div>
               <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:var(--accent-gold)">@${vb.bkOdds}</div>
+              ${vb.bestBook ? `<div style="font-size:10px;color:var(--muted);margin-top:1px">${vb.bestBook}</div>` : ''}
             </div>
             <div>
               <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Edge</div>
@@ -3207,6 +3208,7 @@ function renderValueBetsView() {
         <div class="vb-card-right">
           <div class="vb-odds-val">@${vb.bkOdds}</div>
           <div class="vb-odds-label">Cuota mercado</div>
+          ${vb.bestBook ? `<div style="font-size:11px;color:var(--accent-gold);font-weight:600;margin-top:3px">${vb.bestBook}</div>` : ''}
           <div style="margin-top:8px">${'★'.repeat(m.stars)}</div>
         </div>
       </div>`;
@@ -3417,7 +3419,7 @@ function renderMatchModal(m) {
           ${vb.sharpMoney ? '<span style="margin-left:4px;font-size:11px;color:var(--accent-yellow)">⚡ Sharp money</span>' : ''}
         </div>
         <div style="text-align:right">
-          <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:20px;font-weight:800">@${vb.bkOdds}</div>
+          <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:20px;font-weight:800">@${vb.bkOdds}${vb.bestBook ? ` <span style="font-size:11px;color:var(--accent-gold);font-weight:600">${vb.bestBook}</span>` : ''}</div>
           <div style="font-size:10px;color:var(--muted)">Modelo ${vb.modelProb}% vs Impl. ${vb.impliedProb}%${vb.pinnacleProb ? ` vs Pin. ${vb.pinnacleProb}%` : ''}</div>
           ${vb.oddsMovement ? `<div style="font-size:10px;color:var(--accent-yellow)">Cuota acortó ×${vb.oddsMovement}</div>` : ''}
           ${vb.clvVsPinnacle !== null && vb.clvVsPinnacle !== undefined ? `<div style="font-size:10px;color:${vb.clvVsPinnacle >= 0 ? 'var(--accent-teal)' : 'var(--accent-orange)'}">CLV vs Pinnacle ${vb.clvVsPinnacle >= 0 ? '+' : ''}${vb.clvVsPinnacle}%</div>` : ''}

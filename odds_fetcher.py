@@ -181,25 +181,70 @@ def _fetch_sport(sport_key: str) -> tuple[list[dict], str]:
     return resp.json(), remaining
 
 
+# Display names for bookmaker keys returned by The Odds API
+_BK_DISPLAY: dict[str, str] = {
+    "bet365":         "Bet365",
+    "betway":         "Betway",
+    "unibet_eu":      "Unibet",
+    "pinnacle":       "Pinnacle",
+    "bwin":           "Bwin",
+    "williamhill":    "William Hill",
+    "betfair":        "Betfair",
+    "betfair_ex_eu":  "Betfair",
+    "888sport":       "888sport",
+    "coral":          "Coral",
+    "ladbrokes_eu":   "Ladbrokes",
+    "marathonbet":    "Marathonbet",
+    "nordicbet":      "Nordicbet",
+    "coolbet":        "Coolbet",
+    "onexbet":        "1xBet",
+    "draftkings":     "DraftKings",
+    "mybookieag":     "MyBookie",
+    "bovada":         "Bovada",
+    "livescore_bets": "LiveScore",
+    "everygame":      "Everygame",
+}
+
+
+def _bk_display(key: str) -> str:
+    """Return a human-readable bookmaker name for a raw API key."""
+    return _BK_DISPLAY.get(key, key.replace("_", " ").title())
+
+
 def _best_odds(event: dict) -> dict | None:
     """
     Extract best (highest) 1X2 and Over 2.5 prices across all bookmakers.
-    Returns {"odds_1", "odds_x", "odds_2", "odds_o25"} or None if 1X2 incomplete.
-    odds_o25 may be None if no bookmaker provides an O2.5 line.
+    Also records which bookmaker has the best price for each 1X2 outcome.
+
+    Returns dict with keys:
+        odds_1, odds_x, odds_2          — best decimal prices
+        bk_1, bk_x, bk_2               — display name of bookmaker with best price
+        odds_o25 (optional)             — best Over 2.5 price
+    Returns None if 1X2 is incomplete.
     """
     home = event["home_team"]
     away = event["away_team"]
     best = {"odds_1": 0.0, "odds_x": 0.0, "odds_2": 0.0, "odds_o25": 0.0}
+    best_bk = {"bk_1": "", "bk_x": "", "bk_2": ""}
 
     for bk in event.get("bookmakers", []):
+        bk_name = _bk_display(bk.get("key", ""))
         for mkt in bk.get("markets", []):
             if mkt["key"] == "h2h":
                 by_name = {o["name"]: o["price"] for o in mkt["outcomes"]}
-                best["odds_1"] = max(best["odds_1"], by_name.get(home, 0.0))
-                best["odds_x"] = max(best["odds_x"], by_name.get("Draw", 0.0))
-                best["odds_2"] = max(best["odds_2"], by_name.get(away, 0.0))
+                p1 = by_name.get(home, 0.0)
+                px = by_name.get("Draw", 0.0)
+                p2 = by_name.get(away, 0.0)
+                if p1 > best["odds_1"]:
+                    best["odds_1"] = p1
+                    best_bk["bk_1"] = bk_name
+                if px > best["odds_x"]:
+                    best["odds_x"] = px
+                    best_bk["bk_x"] = bk_name
+                if p2 > best["odds_2"]:
+                    best["odds_2"] = p2
+                    best_bk["bk_2"] = bk_name
             elif mkt["key"] == "totals":
-                # Find the best Over 2.5 line specifically
                 for o in mkt["outcomes"]:
                     if o.get("name") == "Over" and abs(o.get("point", 0) - 2.5) < 0.01:
                         best["odds_o25"] = max(best["odds_o25"], o["price"])
@@ -211,6 +256,9 @@ def _best_odds(event: dict) -> dict | None:
         "odds_1": best["odds_1"],
         "odds_x": best["odds_x"],
         "odds_2": best["odds_2"],
+        "bk_1":   best_bk["bk_1"],
+        "bk_x":   best_bk["bk_x"],
+        "bk_2":   best_bk["bk_2"],
     }
     if best["odds_o25"] > 1.0:
         result["odds_o25"] = best["odds_o25"]
@@ -276,6 +324,9 @@ def fetch_window(
                 "odds_x":    round(odds["odds_x"], 2),
                 "odds_2":    round(odds["odds_2"], 2),
                 "odds_o25":  round(odds["odds_o25"], 2) if odds.get("odds_o25") else "",
+                "bk_1":      odds.get("bk_1", ""),
+                "bk_x":      odds.get("bk_x", ""),
+                "bk_2":      odds.get("bk_2", ""),
             }
             rows.append((ev_date, row))
             # Record kickoff time for hours_to_kickoff tracking
@@ -310,7 +361,8 @@ def fetch_window(
         path = os.path.join(ODDS_DIR, f"{date_str}.csv")
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(
-                f, fieldnames=["home_team", "away_team", "odds_1", "odds_x", "odds_2", "odds_o25"]
+                f, fieldnames=["home_team", "away_team", "odds_1", "odds_x", "odds_2",
+                                "odds_o25", "bk_1", "bk_x", "bk_2"]
             )
             writer.writeheader()
             writer.writerows(rows)

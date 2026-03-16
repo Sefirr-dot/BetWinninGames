@@ -171,6 +171,9 @@ def load_odds_csv(date_str: str) -> dict:
                         "odds_2":     float(row["odds_2"]),
                         "home_team":  home_raw,
                         "away_team":  away_raw,
+                        "bk_1":       row.get("bk_1", ""),
+                        "bk_x":       row.get("bk_x", ""),
+                        "bk_2":       row.get("bk_2", ""),
                     }
                     # Optional O2.5 / BTTS columns — present when odds_fetcher fetches totals market
                     if row.get("odds_o25"):
@@ -396,17 +399,19 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
             movement = None
             pinnacle_implied = None
 
+        # Map outcome → (model_prob, bk_odds, best_bookmaker_name)
         checks = [
-            ("home",  pred.get("prob_home", 0.0), odds["odds_1"]),
-            ("draw",  pred.get("prob_draw", 0.0), odds["odds_x"]),
-            ("away",  pred.get("prob_away", 0.0), odds["odds_2"]),
+            ("home",  pred.get("prob_home", 0.0), odds["odds_1"], odds.get("bk_1", "")),
+            ("draw",  pred.get("prob_draw", 0.0), odds["odds_x"], odds.get("bk_x", "")),
+            ("away",  pred.get("prob_away", 0.0), odds["odds_2"], odds.get("bk_2", "")),
         ]
 
         # Add Over 2.5 and BTTS when bookmaker odds are available in the CSV
+        # (no bk name tracking for these markets — best odds across books already applied)
         if (odds.get("odds_o25") or 0) > 1.0:
-            checks.append(("over25", pred.get("over25", 0.0), odds["odds_o25"]))
+            checks.append(("over25", pred.get("over25", 0.0), odds["odds_o25"], ""))
         if (odds.get("odds_btts") or 0) > 1.0:
-            checks.append(("btts", pred.get("btts_prob", 0.0), odds["odds_btts"]))
+            checks.append(("btts", pred.get("btts_prob", 0.0), odds["odds_btts"], ""))
 
         # Anti-draw squeeze: when market overprices draw vs model, the model is
         # confident that home/away is underpriced. Partially redistribute the
@@ -436,7 +441,7 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
         _dc_sub  = pred.get("dc")  or {}
         _elo_sub = pred.get("elo") or {}
 
-        for outcome, model_prob, bk_odds in checks:
+        for outcome, model_prob, bk_odds, best_book in checks:
             if bk_odds <= VALUE_BET_MIN_ODDS:
                 continue  # market too efficient at short odds — skip
             implied_prob = 1.0 / bk_odds
@@ -507,6 +512,7 @@ def find_edges(predictions: list[dict], odds_map: dict) -> list[dict]:
                     "implied_prob":    implied_prob,
                     "edge":            effective_edge,
                     "bk_odds":         bk_odds,
+                    "best_book":       best_book,
                     "kelly_fraction":  kelly,
                     "kelly_base":      kelly_base,
                     "market_inefficiency_score": mis,
