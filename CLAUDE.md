@@ -50,11 +50,13 @@ python backtest.py --league FL1 --seasons 2023 2024 --min-stars 4
 
 Open the visualizer via the local HTTP server (required for Ollama CORS):
 ```bash
-run_visualizer.bat   # starts python -m http.server 8080 --bind 127.0.0.1, opens browser
+run_visualizer.bat   # starts visualizador/server.py on port 8080, opens browser
 # or manually:
-cd visualizador && python -m http.server 8080 --bind 127.0.0.1
+python visualizador/server.py 8080
 ```
 > Opening `index.html` directly as `file://` blocks Ollama AI risk analysis due to CORS.
+
+`visualizador/server.py` is a custom `SimpleHTTPRequestHandler` subclass that serves all responses with `Cache-Control: no-cache, no-store`. All data JS files (`predictions.js`, `tracker_data.js`, etc.) are also loaded with a `?v=Date.now()` cache-busting query string baked into `index.html` — the browser always fetches fresh data after each `main.py` run.
 
 ## First-time setup
 
