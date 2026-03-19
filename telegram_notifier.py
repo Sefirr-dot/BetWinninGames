@@ -1,11 +1,11 @@
 """
 Telegram notifications for BetWinninGames.
 
-Sends 4 messages after each main.py run:
+Sends up to 5 messages after each main.py run:
   1. Top picks (>= TELEGRAM_MIN_STARS) with outcome + cuota
   2. Value bets con outcome, edge y cuota de mercado
-  3. Combinadas: Doble Segura + Triple Media
-  4. Combinadas: Cuadruple Arriesgada + Valor EV+
+  3. Combinadas: Doble Favorita + Triple Equilibrada
+  4. Combinadas: Cuadruple Valor + Quintuple Atrevida
 
 Setup
 -----
@@ -68,19 +68,21 @@ def _all_vbs(all_data: dict) -> list[dict]:
 
 def _calc_best_bets(all_data: dict, vbs: list[dict] | None = None) -> list[dict]:
     """
-    Mirror of calcBestBets() in index.html.
-    Returns bets of type victoria/over25/btts sorted by score DESC.
-    score = stars^2 * prob / 100  (same formula as the visualiser)
+    Build candidate bet pool from all predictions.
 
-    When vbs is provided, each bet gets an "edge" field from the matching
-    value bet so that _ilp_parlay() can use it in the ILP objective.
+    Each bet is enriched with:
+      - legScore = stars^2 * prob * (1 + edge_bonus)
+      - edge_bonus from matching value bet (0 if none)
+      - league, match_date for correlation penalty
     """
     # Build edge lookup from value bets: (home_name, away_name, outcome) -> edge
     _edge_map: dict[tuple, float] = {}
     if vbs:
         for vb in vbs:
             key = (vb.get("home_name", ""), vb.get("away_name", ""), vb.get("outcome", ""))
-            _edge_map[key] = vb.get("edge", 0.0)
+            prev = _edge_map.get(key, 0.0)
+            if vb.get("edge", 0.0) > prev:
+                _edge_map[key] = vb.get("edge", 0.0)
 
     bets = []
     for date_str in sorted(all_data):
@@ -88,8 +90,6 @@ def _calc_best_bets(all_data: dict, vbs: list[dict] | None = None) -> list[dict]
             pred  = e["prediction"]
             mi    = e["match_info"]
             stars = pred.get("stars", 1)
-            if stars < 2:
-                continue
 
             p1 = pred.get("prob_home", 0) * 100
             px = pred.get("prob_draw", 0) * 100
@@ -101,48 +101,77 @@ def _calc_best_bets(all_data: dict, vbs: list[dict] | None = None) -> list[dict]
             away_fn = mi.get("awayTeam", {}).get("name", "")
             date_s  = mi.get("utcDate", "")[:10]
             match_key = date_s + "|" + home_fn
+            league = mi.get("_league_code", "")
 
-            # Victoria bet (home or away only, ≥55%)
-            if p1 > px and p1 > p2 and p1 >= 55:
+            # Victoria bet (home or away, highest 1X2 prob, skip draws)
+            if p1 > px and p1 > p2 and p1 >= 48:
+                edge_bonus = _edge_map.get((home_fn, away_fn, "home"), 0.0)
+                leg_score = stars * stars * p1 * (1 + edge_bonus)
                 bets.append({"entry": e, "type": "victoria", "match_key": match_key,
                     "label": f"Victoria {home_s}", "prob": p1,
-                    "score": stars * stars * p1 / 100,
+                    "score": leg_score, "leg_score": leg_score,
                     "fair_odds": round(100 / p1, 2),
-                    "edge": _edge_map.get((home_fn, away_fn, "home"), 0.0)})
-            elif p2 > p1 and p2 > px and p2 >= 55:
+                    "edge": edge_bonus, "edge_bonus": edge_bonus,
+                    "league": league, "match_date": date_s})
+            elif p2 > p1 and p2 > px and p2 >= 48:
+                edge_bonus = _edge_map.get((home_fn, away_fn, "away"), 0.0)
+                leg_score = stars * stars * p2 * (1 + edge_bonus)
                 bets.append({"entry": e, "type": "victoria", "match_key": match_key,
                     "label": f"Victoria {away_s}", "prob": p2,
-                    "score": stars * stars * p2 / 100,
+                    "score": leg_score, "leg_score": leg_score,
                     "fair_odds": round(100 / p2, 2),
-                    "edge": _edge_map.get((home_fn, away_fn, "away"), 0.0)})
+                    "edge": edge_bonus, "edge_bonus": edge_bonus,
+                    "league": league, "match_date": date_s})
 
             # Over 2.5
             o25 = pred.get("over25", 0) * 100
-            if pred.get("over25", 0) >= 0.50 and o25 >= 58:
+            if pred.get("over25", 0) >= 0.48 and o25 >= 48:
+                edge_bonus = _edge_map.get((home_fn, away_fn, "over25"), 0.0)
+                leg_score = stars * stars * o25 * (1 + edge_bonus)
                 bets.append({"entry": e, "type": "over25", "match_key": match_key,
                     "label": "Over 2.5 Goles", "prob": o25,
-                    "score": stars * stars * o25 / 100,
+                    "score": leg_score, "leg_score": leg_score,
                     "fair_odds": round(100 / o25, 2),
-                    "edge": _edge_map.get((home_fn, away_fn, "over25"), 0.0)})
+                    "edge": edge_bonus, "edge_bonus": edge_bonus,
+                    "league": league, "match_date": date_s})
 
             # BTTS
             btts = pred.get("btts_prob", 0) * 100
-            if pred.get("btts_prob", 0) >= 0.50 and btts >= 58:
+            if pred.get("btts_prob", 0) >= 0.48 and btts >= 48:
+                edge_bonus = _edge_map.get((home_fn, away_fn, "btts"), 0.0)
+                leg_score = stars * stars * btts * (1 + edge_bonus)
                 bets.append({"entry": e, "type": "btts", "match_key": match_key,
                     "label": "Ambos Marcan", "prob": btts,
-                    "score": stars * stars * btts / 100,
+                    "score": leg_score, "leg_score": leg_score,
                     "fair_odds": round(100 / btts, 2),
-                    "edge": _edge_map.get((home_fn, away_fn, "btts"), 0.0)})
+                    "edge": edge_bonus, "edge_bonus": edge_bonus,
+                    "league": league, "match_date": date_s})
 
-    bets.sort(key=lambda b: b["score"], reverse=True)
+    bets.sort(key=lambda b: b["leg_score"], reverse=True)
     return bets
 
 
-def _pool_from_bets(bets: list[dict], min_stars: int) -> list[dict]:
-    """Unique-per-match pool sorted by prob DESC — mirrors buildPool() in JS."""
+def _corr_penalty(legs: list[dict]) -> float:
+    """
+    Correlation penalty para piernas del mismo día y liga.
+    Empírico: rho ~0.03 -> factor 0.96 por par.
+    """
+    penalty = 1.0
+    for i in range(len(legs)):
+        for j in range(i + 1, len(legs)):
+            a, b = legs[i], legs[j]
+            if a.get("league") == b.get("league") and a.get("match_date") == b.get("match_date"):
+                penalty *= 0.96
+    return penalty
+
+
+def _build_pool(bets: list[dict], min_stars: int, min_prob: float) -> list[dict]:
+    """Unique-per-match pool filtered by min_stars and min_prob, sorted by prob desc."""
     seen, pool = set(), []
-    for b in sorted(bets, key=lambda b: b["prob"], reverse=True):
+    for b in sorted(bets, key=lambda x: x["prob"], reverse=True):
         if b["entry"]["prediction"]["stars"] < min_stars:
+            continue
+        if b["prob"] < min_prob:
             continue
         if b["match_key"] not in seen:
             seen.add(b["match_key"])
@@ -150,71 +179,35 @@ def _pool_from_bets(bets: list[dict], min_stars: int) -> list[dict]:
     return pool
 
 
-def _ilp_parlay(bets: list[dict], n_legs: int) -> list[dict]:
+def _exhaustive_search(pool: list[dict], n_legs: int, min_combined_prob: float) -> list[dict] | None:
     """
-    Select n_legs bets from the candidate pool using integer linear programming.
-
-    Objective: maximise sum(log(prob_i/100) + 0.5 * edge_i)
-    Constraints:
-      - Exactly n_legs bets selected
-      - At most 1 bet per match (match_key)
-      - Binary selection variables
-
-    Falls back to greedy selection if scipy.milp fails or is unavailable.
-    Uses scipy.optimize.milp (scipy >= 1.7, already required by this project).
+    Exhaustive search para maximizar prob_acumulada × corrPenalty.
+    Integrar corrPenalty en la selección evita apilar piernas de la misma liga/día.
+    Pool capped at 15 entries (C(15,5) = 3003 max combos).
     """
-    if len(bets) <= n_legs:
-        return bets  # nothing to optimise
+    from itertools import combinations
 
-    try:
-        import math
-        import numpy as np
-        from scipy.optimize import milp, LinearConstraint, Bounds
+    if len(pool) < n_legs:
+        return None
 
-        n = len(bets)
+    search_pool = pool[:15]
+    best_combo = None
+    best_score = -1.0
 
-        # Objective: minimise negative of maximise (milp minimises)
-        c = np.array([
-            -(math.log(max(b["prob"] / 100.0, 1e-9)) + 0.5 * b.get("edge", 0.0))
-            for b in bets
-        ])
+    for combo in combinations(range(len(search_pool)), n_legs):
+        legs = [search_pool[i] for i in combo]
+        raw_prob = 1.0
+        for leg in legs:
+            raw_prob *= leg["prob"] / 100.0
+        raw_prob *= 100.0
+        if raw_prob < min_combined_prob:
+            continue
+        score = raw_prob * _corr_penalty(legs)  # penaliza correlación en la selección
+        if score > best_score:
+            best_score = score
+            best_combo = legs
 
-        # Constraint 1: exactly n_legs selected
-        A_total = np.ones((1, n))
-
-        # Constraint 2: at most 1 per match
-        unique_keys = list(dict.fromkeys(b["match_key"] for b in bets))
-        A_match = np.zeros((len(unique_keys), n))
-        for mi, mk in enumerate(unique_keys):
-            for bi, b in enumerate(bets):
-                if b["match_key"] == mk:
-                    A_match[mi, bi] = 1.0
-
-        A = np.vstack([A_total, A_match])
-        lb = np.concatenate([[n_legs],   np.zeros(len(unique_keys))])
-        ub = np.concatenate([[n_legs],   np.ones(len(unique_keys))])
-
-        constraints = LinearConstraint(A, lb, ub)
-        integrality = np.ones(n)
-        bounds      = Bounds(lb=np.zeros(n), ub=np.ones(n))
-
-        result = milp(c, constraints=constraints, integrality=integrality, bounds=bounds)
-        if result.success:
-            selected = [bets[i] for i in range(n) if result.x[i] > 0.5]
-            if len(selected) == n_legs:
-                return selected
-    except Exception:
-        pass
-
-    # Greedy fallback: unique-per-match, sorted by score
-    seen, pool = set(), []
-    for b in sorted(bets, key=lambda b: b["score"], reverse=True):
-        if b["match_key"] not in seen:
-            seen.add(b["match_key"])
-            pool.append(b)
-        if len(pool) == n_legs:
-            break
-    return pool
+    return best_combo
 
 
 def _parlay_text(bets: list[dict], title: str, emoji: str) -> list[str]:
@@ -237,80 +230,45 @@ def _parlay_text(bets: list[dict], title: str, emoji: str) -> list[str]:
             combined_odds *= fair
         else:
             has_odds = False
-        lines.append(f"  {stars_e} `{home} vs {away}` — *{b['label']}* ({b['prob']:.0f}%)")
+        edge_str = f" +{b['edge_bonus']*100:.0f}%" if b.get("edge_bonus", 0) > 0.001 else ""
+        lines.append(f"  {stars_e} `{home} vs {away}` — *{b['label']}* ({b['prob']:.0f}%{edge_str})")
 
+    cp = _corr_penalty(bets)
     cp_str = f"{combined_prob*100:.1f}%"
     co_str = f"@{combined_odds:.2f}" if has_odds else ""
-    lines.append(f"  _Prob combinada: {cp_str}  {co_str}_")
+    corr_str = f" (corr: {cp:.2f})" if cp < 0.999 else ""
+    lines.append(f"  _Prob combinada: {cp_str}  {co_str}{corr_str}_")
     return lines
 
 
 def _build_parlays(all_data: dict, vbs: list[dict]) -> list[tuple]:
     """
-    Mirror of getSuggestedParlays() in index.html.
-    Returns list of (title, emoji, bets_list).
+    V2 Parlay Engine — mirrors getSuggestedParlays() in index.html.
 
-    Parlay selection now uses ILP (scipy.optimize.milp) to find the globally
-    optimal N-leg combination maximising log(combined_prob) + 0.5*sum(edges),
-    subject to exactly N bets and at most 1 per match.
-    Falls back to greedy if ILP unavailable.
+    Uses exhaustive search over candidate pools to maximise:
+      parlayEV = product(prob_i) * product(fairOdds_i) * correlationPenalty
+
+    Each leg scored by: legScore = stars^2 * prob * (1 + edge_bonus)
+
+    Returns list of (title, emoji, bets_list).
     """
-    bets  = _calc_best_bets(all_data, vbs=vbs)
-    pool4 = _pool_from_bets(bets, 4)
-    pool3 = _pool_from_bets(bets, 3)
-    pool2 = _pool_from_bets(bets, 2)
+    bets = _calc_best_bets(all_data, vbs=vbs)
+
+    # Parlay configs: (n_legs, title, emoji, min_stars, min_prob, min_combined_prob)
+    # Objetivo: maximizar probabilidad acumulada (seguras, aunque la cuota baje)
+    configs = [
+        (2, "Doble Segura",       "🟢", 3, 62, 38),
+        (3, "Triple Sólida",      "🟡", 3, 58, 22),
+        (4, "Cuádruple Firme",    "🟠", 2, 55, 12),
+        (5, "Quíntuple Valiente", "🔴", 2, 55,  8),
+    ]
 
     parlays = []
-
-    # Doble Segura — ILP from 4★+ pool (fall back to 3★+)
-    dbl_src = pool4 if len(pool4) >= 2 else pool3
-    if len(dbl_src) >= 2:
-        parlays.append(("Doble Segura", "🟢", _ilp_parlay(dbl_src, 2)))
-
-    # Triple Media — ILP from 3★+ pool
-    if len(pool3) >= 3:
-        parlays.append(("Triple Media", "🟡", _ilp_parlay(pool3, 3)))
-
-    # Cuadruple Arriesgada — ILP from 3★+ (fall back to 2★+)
-    quad_src = pool3 if len(pool3) >= 4 else pool2
-    if len(quad_src) >= 4:
-        parlays.append(("Cuadruple Arriesgada", "🟠", _ilp_parlay(quad_src, 4)))
-
-    # EV+ — best VB per match, sorted by edge, ≥3★
-    entry_idx = {}
-    for b in bets:
-        mk = b["match_key"]
-        if mk not in entry_idx:
-            entry_idx[mk] = b["entry"]
-
-    ev_bets, ev_seen = [], set()
-    for vb in sorted(vbs, key=lambda v: v.get("edge", 0), reverse=True):
-        if len(ev_bets) >= 4:
-            break
-        mi   = None
-        # find entry by home/away name
-        home_n = vb.get("home_name", "")
-        away_n = vb.get("away_name", "")
-        for b in bets:
-            bmi = b["entry"]["match_info"]
-            if (bmi.get("homeTeam", {}).get("name", "") == home_n and
-                    bmi.get("awayTeam", {}).get("name", "") == away_n):
-                mi = b
-                break
-        if not mi or mi["match_key"] in ev_seen:
-            continue
-        if mi["entry"]["prediction"]["stars"] < 3:
-            continue
-        ev_seen.add(mi["match_key"])
-        ev_bets.append({"entry": mi["entry"], "type": "victoria",
-            "match_key": mi["match_key"],
-            "label": _OUTCOME_LABEL.get(vb.get("outcome", ""), vb.get("outcome", "")),
-            "prob": round(vb.get("model_prob", 0) * 100, 1),
-            "score": 0,
-            "fair_odds": round(vb["bk_odds"], 2) if vb.get("bk_odds") else None})
-
-    if len(ev_bets) >= 2:
-        parlays.append(("Valor EV+", "💰", ev_bets))
+    for n_legs, title, emoji, min_stars, min_prob, min_cp in configs:
+        pool = _build_pool(bets, min_stars, min_prob)
+        best_legs = _exhaustive_search(pool, n_legs, min_cp)
+        if best_legs:
+            parlays.append((title, emoji, best_legs))
 
     return parlays
 
@@ -454,7 +412,7 @@ def _msg_parlays(all_data: dict) -> list[str]:
     if not parlays:
         return []
 
-    # Group into two messages: Doble+Triple in msg3, Cuadruple+EV in msg4
+    # Group into two messages: Doble+Triple in msg3, Cuadruple+Quintuple in msg4
     groups = [parlays[:2], parlays[2:]]
     messages = []
 

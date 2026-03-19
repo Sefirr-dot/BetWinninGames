@@ -36,7 +36,7 @@ from scipy.optimize import minimize
 from scipy.special import expit
 
 OVER25_MODEL_PATH = "cache/over25_model.json"
-OVER25_MODEL_MIN_SAMPLES = 50
+OVER25_MODEL_MIN_SAMPLES = 200
 
 
 _LAM_MU_NORM = 3.0  # normalisation: maps lam+mu (~[0.6,6]) to ~[0.2,2.0] scale

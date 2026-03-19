@@ -62,7 +62,6 @@ def score(pos: int, n_teams: int, pts: int,
     # UCL (top 4 typically)
     ucl_cutoff = 4
     if pos <= ucl_cutoff + 3:
-        gap_to_ucl = max(0, (pts - 1) - pts)   # simplified
         if pos <= ucl_cutoff:
             s += _SCORE["ucl_race"] * 0.5       # already in zone, fight to stay
         elif pos <= ucl_cutoff + 2:

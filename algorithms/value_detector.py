@@ -80,7 +80,7 @@ def _kelly_fraction(edge: float, bk_odds: float, stars: int, league: str = "") -
     cache/tracker_metrics.json (when >= _KELLY_MIN_PICKS resolved picks exist).
     Hard cap at 25% regardless of tier.
     """
-    raw = edge / (bk_odds - 1)
+    raw = edge * bk_odds / (bk_odds - 1)
     if stars >= 5 and edge >= 0.15:
         mult = 1.0
     elif stars >= 4 and edge >= 0.10:

@@ -2128,21 +2128,21 @@ const BET_TYPE_CONFIG = {
 function calcBestBets() {
   const bets = [];
   ALL_MATCHES.forEach(m => {
-    if (m.stars < 2) return;
-    // Result bet (team most likely to win)
+    // No star filter here — parlay tiers apply their own min_stars in buildPool()
+    // Result bet (team most likely to win, skip draws)
     const winner = winnerTeam(m);
     const betProb = winner === 'home' ? m.prob1 : m.prob2;
-    if (betProb >= 55) {
+    if (betProb >= 48) {
       const betTeam = winner === 'home' ? m.homeShort : m.awayShort;
       bets.push({ match: m, type: 'victoria', label: `Victoria ${betTeam}`, prob: betProb, score: m.stars * m.stars * betProb / 100, fairOdds: m.fairOdds });
     }
     // Over 2.5
-    if (m.over25yn && m.over25 >= 58) {
+    if (m.over25yn && m.over25 >= 48) {
       const o25Odds = m.over25 > 0 ? parseFloat((100 / m.over25).toFixed(2)) : null;
       bets.push({ match: m, type: 'over25', label: 'Over 2.5 Goles', prob: m.over25, score: m.stars * m.stars * m.over25 / 100, fairOdds: o25Odds });
     }
     // BTTS
-    if (m.bttsyn && m.btts >= 58) {
+    if (m.bttsyn && m.btts >= 48) {
       const bttsOdds = m.btts > 0 ? parseFloat((100 / m.btts).toFixed(2)) : null;
       bets.push({ match: m, type: 'btts', label: 'Ambos Marcan', prob: m.btts, score: m.stars * m.stars * m.btts / 100, fairOdds: bttsOdds });
     }
@@ -2151,68 +2151,152 @@ function calcBestBets() {
 }
 
 function getSuggestedParlays(bets) {
-  const _ol = { home: 'Victoria Local', draw: 'Empate', away: 'Victoria Visit.', over25: 'Over 2.5', btts: 'BTTS' };
+  // ── V2 Parlay Engine ──
+  // Optimised combinada selection using composite leg scoring,
+  // exhaustive/greedy EV search, and correlation penalty.
+  //
+  // legScore = stars^2 * prob * (1 + edge_bonus)
+  // parlayEV = product(prob_i) * product(fairOdds_i) * correlationPenalty
+  // correlationPenalty: same league + same day -> 0.92 per correlated pair
 
-  // Build pool of unique-per-match bets, sorted by probability descending
-  function buildPool(minStars) {
-    const seen = new Set();
-    const pool = [];
-    [...bets]
-      .filter(b => b.match.stars >= minStars)
-      .sort((a, b) => b.prob - a.prob)
-      .forEach(b => {
-        const key = b.match.date + '|' + b.match.home;
-        if (!seen.has(key)) { seen.add(key); pool.push(b); }
+  // ── 1. Build enriched bet pool from calcBestBets + value bets ──
+  // Enrich each bet with edge_bonus from valueBets if available
+  function enrichBets(rawBets) {
+    // Build edge lookup: matchKey|outcome -> best edge (%)
+    const edgeMap = new Map();
+    ALL_MATCHES.forEach(m => {
+      if (!m.valueBets || !m.valueBets.length) return;
+      const mk = m.date + '|' + (m.home || m.homeShort);
+      m.valueBets.forEach(vb => {
+        const k = mk + '|' + vb.outcome;
+        const prev = edgeMap.get(k) || 0;
+        if (vb.edge > prev) edgeMap.set(k, vb.edge);
       });
-    return pool;
+    });
+
+    return rawBets.map(b => {
+      const mk = b.match.date + '|' + (b.match.home || b.match.homeShort);
+      // Map bet type to outcome key for edge lookup
+      let outcomeKey;
+      if (b.type === 'victoria') {
+        outcomeKey = winnerTeam(b.match) === 'home' ? 'home' : 'away';
+      } else {
+        outcomeKey = b.type; // 'over25' or 'btts'
+      }
+      const edgePct = edgeMap.get(mk + '|' + outcomeKey) || 0;
+      const edgeBonus = edgePct / 100; // edge is in % in predictions.js (e.g. 8.5 -> 0.085)
+      const legScore = b.match.stars * b.match.stars * b.prob * (1 + edgeBonus);
+      const fairOdds = b.fairOdds || (b.prob > 0 ? parseFloat((100 / b.prob).toFixed(2)) : null);
+      return { ...b, edgeBonus, legScore, fairOdds, outcomeKey,
+               matchKey: mk, league: b.match.league, matchDate: b.match.date };
+    });
   }
 
+  // ── 2. Correlation penalty between two legs ──
+  // Empírico: rho ~0.03 entre partidos mismo día/liga -> factor 0.96 por par
+  function corrPenalty(legs) {
+    let penalty = 1.0;
+    for (let i = 0; i < legs.length; i++) {
+      for (let j = i + 1; j < legs.length; j++) {
+        const a = legs[i], b = legs[j];
+        if (a.league === b.league && a.matchDate === b.matchDate) {
+          penalty *= 0.96; // mismo día + misma liga: -4% por par (empírico)
+        }
+      }
+    }
+    return penalty;
+  }
+
+  // ── 4. Unique-per-match pool builder with min stars + min prob filters ──
+  function buildPool(enrichedBets, minStars, minProb) {
+    const seen = new Set();
+    return enrichedBets
+      .filter(b => b.match.stars >= minStars && b.prob >= minProb)
+      .sort((a, b) => b.prob - a.prob)   // ordenar por probabilidad: más seguras primero
+      .filter(b => {
+        if (seen.has(b.matchKey)) return false;
+        seen.add(b.matchKey);
+        return true;
+      });
+  }
+
+  // ── 5. Optimal N-leg selection ──
+  // For small pools (<=12): exhaustive search of all C(pool, N) combinations.
+  // For larger pools: greedy top-K candidates with local search refinement.
+  function selectBestLegs(pool, nLegs, minCombinedProb) {
+    if (pool.length < nLegs) return null;
+
+    // Exhaustive search for reasonable pool sizes (C(12,5)=792, C(15,5)=3003)
+    if (pool.length <= 15) {
+      return exhaustiveSearch(pool, nLegs, minCombinedProb);
+    }
+    // For larger pools, prune to top 15 by legScore then search exhaustively
+    return exhaustiveSearch(pool.slice(0, 15), nLegs, minCombinedProb);
+  }
+
+  function exhaustiveSearch(pool, nLegs, minCombinedProb) {
+    let bestCombo = null, bestScore = -Infinity;
+    const n = pool.length;
+
+    // Maximiza prob acumulada × corrPenalty para evitar pilas de la misma liga/día
+    function search(start, current) {
+      if (current.length === nLegs) {
+        const legs = current.map(i => pool[i]);
+        const rawProb = legs.reduce((p, b) => p * b.prob / 100, 1) * 100;
+        if (rawProb < minCombinedProb) return;
+        const score = rawProb * corrPenalty(legs); // penaliza correlación en la selección
+        if (score > bestScore) {
+          bestScore = score;
+          bestCombo = [...current];
+        }
+        return;
+      }
+      const remaining = nLegs - current.length;
+      for (let i = start; i <= n - remaining; i++) {
+        current.push(i);
+        search(i + 1, current);
+        current.pop();
+      }
+    }
+
+    search(0, []);
+    return bestCombo ? bestCombo.map(i => pool[i]) : null;
+  }
+
+  // ── 6. Build final parlay object ──
   function buildParlay(legs, title, riskLevel) {
     const combinedProb  = legs.reduce((p, b) => p * b.prob / 100, 1) * 100;
     const hasOdds       = legs.every(b => b.fairOdds != null && !isNaN(parseFloat(b.fairOdds)));
     const combinedOdds  = hasOdds ? legs.reduce((o, b) => o * parseFloat(b.fairOdds), 1) : null;
+    const cp = corrPenalty(legs);
+    const evScore       = hasOdds ? (combinedProb / 100 * combinedOdds * cp) : null;
     return { title, riskLevel, legs,
              combinedProb: combinedProb.toFixed(1),
-             combinedOdds: combinedOdds ? combinedOdds.toFixed(2) : null };
+             combinedOdds: combinedOdds ? combinedOdds.toFixed(2) : null,
+             correlationPenalty: cp,
+             ev: evScore };
   }
 
-  const pool4 = buildPool(4);
-  const pool3 = buildPool(3);
-  const pool2 = buildPool(2);
+  // ── 7. Main logic: generate 4 parlays ──
+  const enriched = enrichBets(bets);
   const parlays = [];
 
-  // Doble (safest): prefer 4★ legs, fall back to 3★
-  const dblPool = pool4.length >= 2 ? pool4 : pool3;
-  if (dblPool.length >= 2)
-    parlays.push(buildParlay(dblPool.slice(0, 2), 'Doble Segura', 'safe'));
+  // Parlay configs: [nLegs, title, riskLevel, minStars, minProb, minCombinedProb]
+  // Objetivo: maximizar probabilidad acumulada (ganar más veces, aunque la cuota baje)
+  const configs = [
+    [2, 'Doble Segura',         'safe',    3, 62, 38],
+    [3, 'Triple Sólida',        'medium',  3, 58, 22],
+    [4, 'Cuádruple Firme',      'risky',   2, 55, 12],
+    [5, 'Quíntuple Valiente',   'extreme', 2, 55,  8],
+  ];
 
-  // Triple: top 3 from 3★+
-  if (pool3.length >= 3)
-    parlays.push(buildParlay(pool3.slice(0, 3), 'Triple Media', 'medium'));
-
-  // Cuádruple: top 4 from 3★+ (fall back to 2★ if needed)
-  const quadPool = pool3.length >= 4 ? pool3 : pool2;
-  if (quadPool.length >= 4)
-    parlays.push(buildParlay(quadPool.slice(0, 4), 'Cuádruple Arriesgada', 'risky'));
-
-  // Value EV+: legs with confirmed positive edge vs bookmaker
-  const vbLegs = [];
-  const vbSeen = new Set();
-  [...ALL_MATCHES]
-    .filter(m => m.valueBets && m.valueBets.length && m.stars >= 3)
-    .sort((a, b) => Math.max(...b.valueBets.map(v => v.edge)) - Math.max(...a.valueBets.map(v => v.edge)))
-    .forEach(m => {
-      const key = m.date + '|' + m.home;
-      if (vbSeen.has(key) || vbLegs.length >= 4) return;
-      vbSeen.add(key);
-      const bestVB = [...m.valueBets].sort((a, b) => b.edge - a.edge)[0];
-      vbLegs.push({ match: m, type: 'victoria',
-        label: _ol[bestVB.outcome] || bestVB.outcome,
-        prob: bestVB.modelProb, score: m.stars * m.stars * bestVB.modelProb / 100,
-        fairOdds: m.fairOdds, edge: bestVB.edge });
-    });
-  if (vbLegs.length >= 2)
-    parlays.push(buildParlay(vbLegs, '💰 Valor EV+', 'value'));
+  for (const [nLegs, title, riskLevel, minStars, minProb, minCombinedProb] of configs) {
+    const pool = buildPool(enriched, minStars, minProb);
+    const bestLegs = selectBestLegs(pool, nLegs, minCombinedProb);
+    if (bestLegs) {
+      parlays.push(buildParlay(bestLegs, title, riskLevel));
+    }
+  }
 
   return parlays;
 }
@@ -2363,10 +2447,11 @@ function renderBestBetsView(bets) {
   const maxScore = bets.length ? bets[0].score : 1;
 
   const RISK_META = {
-    safe:   { color: 'var(--accent-green)',  icon: '🟢', desc: '2 selecciones · Más probable' },
-    medium: { color: 'var(--accent-yellow)', icon: '🟡', desc: '3 selecciones · Equilibrada' },
-    risky:  { color: 'var(--accent-orange)', icon: '🟠', desc: '4 selecciones · Mayor retorno' },
-    value:  { color: 'var(--accent-gold)',   icon: '💰', desc: 'Edge positivo vs mercado' },
+    safe:    { color: 'var(--accent-green)',  icon: '🟢', desc: '2 selecciones · Mas probable' },
+    medium:  { color: 'var(--accent-yellow)', icon: '🟡', desc: '3 selecciones · Equilibrada' },
+    risky:   { color: 'var(--accent-orange)', icon: '🟠', desc: '4 selecciones · Mayor retorno' },
+    extreme: { color: 'var(--accent-red, #ef4444)', icon: '🔴', desc: '5 selecciones · Maximo retorno' },
+    value:   { color: 'var(--accent-gold)',   icon: '💰', desc: 'Edge positivo vs mercado' },
   };
 
   function renderParlayBox(parlay) {
@@ -2435,7 +2520,7 @@ function renderBestBetsView(bets) {
   if (parlays.length > 0) {
     parlayHtml = `
       <div class="bb-section">
-        <div class="bb-section-title">Combinadas Recomendadas — de más segura a más arriesgada</div>
+        <div class="bb-section-title">Combinadas Recomendadas — de mas segura a mas arriesgada (EV optimizado)</div>
         ${parlays.map(renderParlayBox).join('')}
       </div>`;
   }

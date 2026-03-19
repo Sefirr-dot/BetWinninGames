@@ -17,7 +17,6 @@ import sys
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
-import sys
 from datetime import date, datetime
 
 import db_picks
@@ -839,9 +838,10 @@ def _save_results_js(all_picks: list[dict], output_path: str = RESULTS_JS_PATH) 
             matchDate: "2026-03-08"
         }, ... };
     """
+    _result_map = {"home": "H", "draw": "D", "away": "A"}
     resolved = {
         f"{p['home_team']}|{p['away_team']}|{p['match_date']}": {
-            "result":    p["actual_result"],          # "H" | "D" | "A"
+            "result":    _result_map.get(p["actual_result"], p["actual_result"]),  # "H" | "D" | "A"
             "over25":    bool(p.get("actual_over25")),
             "btts":      bool(p.get("actual_btts")),
             "league":    p.get("league", ""),

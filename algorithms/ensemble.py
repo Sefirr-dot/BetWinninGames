@@ -536,7 +536,7 @@ def predict_match(
         "stars": stars,
         "model_confidence": conf,
         "over25": dc_over25,
-        "over35": dc_pred.get("over35", 0.30) if dc_pred else 0.30,
+        "over35": mc.get("over35", dc_pred.get("over35", 0.30) if dc_pred else 0.30),
         "btts_prob": btts_prob,
         "expected_goals_home": lam,
         "expected_goals_away": mu,

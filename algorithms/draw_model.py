@@ -36,7 +36,7 @@ from scipy.optimize import minimize
 from scipy.special import expit
 
 DRAW_MODEL_PATH = "cache/draw_model.json"
-DRAW_MODEL_MIN_SAMPLES = 50   # fewer than meta_learner because simpler model
+DRAW_MODEL_MIN_SAMPLES = 200  # 200 live picks required for stable coefficient estimation
 
 
 # ---------------------------------------------------------------------------
