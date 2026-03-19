@@ -3317,6 +3317,10 @@ function renderValueBetsView() {
           <div class="vb-odds-label">Cuota mercado</div>
           ${vb.bestBook ? `<div style="font-size:11px;color:var(--accent-gold);font-weight:600;margin-top:3px">${vb.bestBook}</div>` : ''}
           <div style="margin-top:8px">${'★'.repeat(m.stars)}</div>
+          <button onclick="event.stopPropagation();addToSlip('${(m.home||m.homeShort).replace(/'/g,"\\'")}','${(m.away||m.awayShort).replace(/'/g,"\\'")}','${m.league}','${m.date}','${vb.outcome}',${vb.bkOdds},${+(((vb.kellyPortfolio||vb.kelly)/100)*vbBankroll).toFixed(2)})"
+            style="margin-top:8px;background:var(--accent-teal);border:none;border-radius:6px;padding:6px 12px;color:#000;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;cursor:pointer;width:100%">
+            + Slip
+          </button>
         </div>
       </div>`;
   }).join('');
@@ -3517,22 +3521,38 @@ function renderMatchModal(m) {
   let vbSection = '';
   if (m.valueBets && m.valueBets.length) {
     const _outL = { home: 'Local', draw: 'Empate', away: 'Visitante' };
-    const vbRows = m.valueBets.map(vb =>
-      `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
-        <div>
-          <span style="font-weight:600;font-size:13px">${_outL[vb.outcome]||vb.outcome}</span>
-          <span class="vb-edge-badge" style="margin-left:8px">Edge +${vb.edge}%</span>
-          <span class="vb-kelly-badge" style="margin-left:4px">Kelly ${vb.kelly}%</span>
-          ${vb.sharpMoney ? '<span style="margin-left:4px;font-size:11px;color:var(--accent-yellow)">⚡ Sharp money</span>' : ''}
+    const _modalBrl = loadBankroll()?.current || 100;
+    const _homeSafe = (m.home || m.homeShort).replace(/'/g, "\\'");
+    const _awaySafe = (m.away || m.awayShort).replace(/'/g, "\\'");
+    const vbRows = m.valueBets.map(vb => {
+      const kellyEur = +(((vb.kellyPortfolio || vb.kelly) / 100) * _modalBrl).toFixed(2);
+      const sc = vb.sharpnessScore || 0;
+      const scColor = sc >= 80 ? 'var(--accent-green)' : sc >= 65 ? 'var(--bl1,#06b6d4)' : sc >= 50 ? '#facc15' : sc >= 35 ? '#f97316' : 'var(--muted)';
+      const scLabel = sc >= 80 ? 'Elite' : sc >= 65 ? 'Fuerte' : sc >= 50 ? 'Moderado' : sc >= 35 ? 'Bajo' : 'Minimo';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:4px">
+            <span style="font-weight:600;font-size:13px">${_outL[vb.outcome]||vb.outcome}</span>
+            <span class="vb-edge-badge">Edge +${vb.edge}%</span>
+            <span class="vb-kelly-badge">Kelly ${vb.kelly}%${vb.kellyPortfolio && vb.kellyPortfolio !== vb.kelly ? ` · <span style="color:var(--accent-green)">Markowitz ${vb.kellyPortfolio}%</span>` : ''}</span>
+            ${vb.sharpMoney ? '<span style="font-size:11px;color:var(--accent-yellow)">⚡ Sharp money</span>' : ''}
+            ${sc > 0 ? `<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(0,0,0,0.3);border:1px solid ${scColor}44;border-radius:6px;padding:2px 7px;font-size:10px;color:${scColor};font-weight:700">⚡ ${sc} ${scLabel}</span>` : ''}
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--muted)">Modelo ${vb.modelProb}% vs Impl. ${vb.impliedProb}%${vb.pinnacleProb ? ` vs Pin. ${vb.pinnacleProb}%` : ''}</div>
+            ${vb.oddsMovement ? `<div style="font-size:10px;color:var(--accent-yellow)">Cuota acortó ×${vb.oddsMovement}</div>` : ''}
+            ${vb.clvVsPinnacle !== null && vb.clvVsPinnacle !== undefined ? `<div style="font-size:10px;color:${vb.clvVsPinnacle >= 0 ? 'var(--accent-teal)' : 'var(--accent-orange)'}">CLV vs Pinnacle ${vb.clvVsPinnacle >= 0 ? '+' : ''}${vb.clvVsPinnacle}%</div>` : ''}
+          </div>
         </div>
-        <div style="text-align:right">
-          <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:20px;font-weight:800">@${vb.bkOdds}${vb.bestBook ? ` <span style="font-size:11px;color:var(--accent-gold);font-weight:600">${vb.bestBook}</span>` : ''}</div>
-          <div style="font-size:10px;color:var(--muted)">Modelo ${vb.modelProb}% vs Impl. ${vb.impliedProb}%${vb.pinnacleProb ? ` vs Pin. ${vb.pinnacleProb}%` : ''}</div>
-          ${vb.oddsMovement ? `<div style="font-size:10px;color:var(--accent-yellow)">Cuota acortó ×${vb.oddsMovement}</div>` : ''}
-          ${vb.clvVsPinnacle !== null && vb.clvVsPinnacle !== undefined ? `<div style="font-size:10px;color:${vb.clvVsPinnacle >= 0 ? 'var(--accent-teal)' : 'var(--accent-orange)'}">CLV vs Pinnacle ${vb.clvVsPinnacle >= 0 ? '+' : ''}${vb.clvVsPinnacle}%</div>` : ''}
+        <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:12px">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800">@${vb.bkOdds}${vb.bestBook ? ` <span style="font-size:11px;color:var(--accent-gold);font-weight:600">${vb.bestBook}</span>` : ''}</div>
+          <button onclick="event.stopPropagation();addToSlip('${_homeSafe}','${_awaySafe}','${m.league}','${m.date}','${vb.outcome}',${vb.bkOdds},${kellyEur})"
+            style="background:var(--accent-teal);border:none;border-radius:6px;padding:5px 12px;color:#000;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;cursor:pointer">
+            + Slip €${kellyEur}
+          </button>
         </div>
-      </div>`
-    ).join('');
+      </div>`;
+    }).join('');
     vbSection = `<div class="modal-section"><div class="modal-section-title">💎 Value Bets</div>${vbRows}</div>`;
   }
 
