@@ -18,7 +18,6 @@ Usage
 import numpy as np
 
 _N_SIMULATIONS = 50_000
-_RNG = np.random.default_rng(seed=42)
 
 
 def simulate(
@@ -45,8 +44,11 @@ def simulate(
     if lambda_ <= 0 or mu_ <= 0:
         return _empty()
 
-    hg = _RNG.poisson(max(lambda_, 1e-6), n).astype(np.int32)
-    ag = _RNG.poisson(max(mu_,      1e-6), n).astype(np.int32)
+    # Per-match seed from lambda/mu — eliminates order-correlation across matches in a run
+    _seed = abs(hash((round(lambda_, 3), round(mu_, 3)))) % (2 ** 32)
+    rng = np.random.default_rng(seed=_seed)
+    hg = rng.poisson(max(lambda_, 1e-6), n).astype(np.int32)
+    ag = rng.poisson(max(mu_,      1e-6), n).astype(np.int32)
     diff  = hg - ag
     total = hg + ag
 

@@ -104,7 +104,9 @@ def train(db_path: str) -> str:
         return f"over25_model: solo {len(X_rows)} filas válidas tras parsear"
 
     X, y = np.array(X_rows), np.array(y_rows)
-    result = minimize(_log_loss, np.zeros(X.shape[1]), args=(X, y), method="L-BFGS-B")
+    # lam_plus_mu (index 2) must be >= 0: more expected goals → more likely Over 2.5
+    bnds = [(None, None), (None, None), (0.0, None), (None, None)]
+    result = minimize(_log_loss, np.zeros(X.shape[1]), args=(X, y), method="L-BFGS-B", bounds=bnds)
 
     os.makedirs("cache", exist_ok=True)
     with open(OVER25_MODEL_PATH, "w", encoding="utf-8") as f:
@@ -156,7 +158,8 @@ def pretrain_from_backtest(backtest_results: list[dict]) -> str:
         return f"over25_model pretrain: solo {len(X_rows)} filas válidas"
 
     X, y = np.array(X_rows), np.array(y_rows)
-    result = minimize(_log_loss, np.zeros(X.shape[1]), args=(X, y), method="L-BFGS-B")
+    bnds = [(None, None), (None, None), (0.0, None), (None, None)]
+    result = minimize(_log_loss, np.zeros(X.shape[1]), args=(X, y), method="L-BFGS-B", bounds=bnds)
 
     os.makedirs("cache", exist_ok=True)
     with open(OVER25_MODEL_PATH, "w", encoding="utf-8") as f:

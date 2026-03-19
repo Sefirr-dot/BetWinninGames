@@ -109,7 +109,9 @@ def train(db_path: str) -> str:
     X = np.array(X_rows)
     y = np.array(y_rows)
 
-    result = minimize(_log_loss, np.zeros(X.shape[1]), args=(X, y), method="L-BFGS-B")
+    # Feature weights (indices 1-4) must be >= 0: more sub-model draw signal → more drawn
+    bnds = [(None, None), (0.0, None), (0.0, None), (0.0, None), (0.0, None)]
+    result = minimize(_log_loss, np.zeros(X.shape[1]), args=(X, y), method="L-BFGS-B", bounds=bnds)
 
     os.makedirs("cache", exist_ok=True)
     with open(DRAW_MODEL_PATH, "w", encoding="utf-8") as f:
@@ -190,7 +192,8 @@ def pretrain_from_backtest(backtest_results: list[dict]) -> str:
     X = np.array(X_rows)
     y = np.array(y_rows)
 
-    result = minimize(_log_loss, np.zeros(X.shape[1]), args=(X, y), method="L-BFGS-B")
+    bnds = [(None, None), (0.0, None), (0.0, None), (0.0, None), (0.0, None)]
+    result = minimize(_log_loss, np.zeros(X.shape[1]), args=(X, y), method="L-BFGS-B", bounds=bnds)
 
     os.makedirs("cache", exist_ok=True)
     with open(DRAW_MODEL_PATH, "w", encoding="utf-8") as f:
