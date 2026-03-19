@@ -443,15 +443,18 @@ def fetch_pinnacle_snapshots(
         print(f"    [Pinnacle/{code}] {matched} partidos  (quota: {remaining})")
         return code, rows
 
-    for i, (code, sk) in enumerate(leagues.items()):
-        if i > 0:
-            time.sleep(0.5)   # avoid 429 rate-limit bursts
-        try:
-            _, rows = _fetch_pinnacle_league(code, sk)
-            for ev_date, row in rows:
-                by_date[ev_date].append(row)
-        except Exception as e:
-            print(f"    [Pinnacle/{code}] Error: {e}")
+    # max_workers=2 limits concurrent requests to avoid 429 rate-limit bursts
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(_fetch_pinnacle_league, code, sk): code
+                   for code, sk in leagues.items()}
+        for fut in as_completed(futures):
+            try:
+                _, rows = fut.result()
+                for ev_date, row in rows:
+                    by_date[ev_date].append(row)
+            except Exception as e:
+                code = futures[fut]
+                print(f"    [Pinnacle/{code}] Error: {e}")
 
     os.makedirs(_PINNACLE_DIR, exist_ok=True)
     written = []

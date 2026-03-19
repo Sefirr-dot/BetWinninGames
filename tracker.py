@@ -20,6 +20,8 @@ if hasattr(sys.stdout, "reconfigure"):
 from datetime import date, datetime
 
 import db_picks
+
+_RESULT_MAP = {"home": "H", "draw": "D", "away": "A"}
 import fetcher
 from config import (CALIBRATION_MIN_SAMPLES, PICKS_DB, TRACKER_JS_PATH,
                     PSI_ALERT_THRESHOLD, PSI_LOOKBACK_RECENT,
@@ -838,10 +840,9 @@ def _save_results_js(all_picks: list[dict], output_path: str = RESULTS_JS_PATH) 
             matchDate: "2026-03-08"
         }, ... };
     """
-    _result_map = {"home": "H", "draw": "D", "away": "A"}
     resolved = {
         f"{p['home_team']}|{p['away_team']}|{p['match_date']}": {
-            "result":    _result_map.get(p["actual_result"], p["actual_result"]),  # "H" | "D" | "A"
+            "result":    _RESULT_MAP.get(p["actual_result"], p["actual_result"]),  # "H" | "D" | "A"
             "over25":    bool(p.get("actual_over25")),
             "btts":      bool(p.get("actual_btts")),
             "league":    p.get("league", ""),

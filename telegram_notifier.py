@@ -18,6 +18,7 @@ The notifier is a no-op when either config value is empty.
 """
 
 import math
+from itertools import combinations
 import requests
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_MIN_STARS
 
@@ -109,18 +110,18 @@ def _calc_best_bets(all_data: dict, vbs: list[dict] | None = None) -> list[dict]
                 leg_score = stars * stars * p1 * (1 + edge_bonus)
                 bets.append({"entry": e, "type": "victoria", "match_key": match_key,
                     "label": f"Victoria {home_s}", "prob": p1,
-                    "score": leg_score, "leg_score": leg_score,
+                    "leg_score": leg_score,
                     "fair_odds": round(100 / p1, 2),
-                    "edge": edge_bonus, "edge_bonus": edge_bonus,
+                    "edge_bonus": edge_bonus,
                     "league": league, "match_date": date_s})
             elif p2 > p1 and p2 > px and p2 >= 48:
                 edge_bonus = _edge_map.get((home_fn, away_fn, "away"), 0.0)
                 leg_score = stars * stars * p2 * (1 + edge_bonus)
                 bets.append({"entry": e, "type": "victoria", "match_key": match_key,
                     "label": f"Victoria {away_s}", "prob": p2,
-                    "score": leg_score, "leg_score": leg_score,
+                    "leg_score": leg_score,
                     "fair_odds": round(100 / p2, 2),
-                    "edge": edge_bonus, "edge_bonus": edge_bonus,
+                    "edge_bonus": edge_bonus,
                     "league": league, "match_date": date_s})
 
             # Over 2.5
@@ -130,9 +131,9 @@ def _calc_best_bets(all_data: dict, vbs: list[dict] | None = None) -> list[dict]
                 leg_score = stars * stars * o25 * (1 + edge_bonus)
                 bets.append({"entry": e, "type": "over25", "match_key": match_key,
                     "label": "Over 2.5 Goles", "prob": o25,
-                    "score": leg_score, "leg_score": leg_score,
+                    "leg_score": leg_score,
                     "fair_odds": round(100 / o25, 2),
-                    "edge": edge_bonus, "edge_bonus": edge_bonus,
+                    "edge_bonus": edge_bonus,
                     "league": league, "match_date": date_s})
 
             # BTTS
@@ -142,9 +143,9 @@ def _calc_best_bets(all_data: dict, vbs: list[dict] | None = None) -> list[dict]
                 leg_score = stars * stars * btts * (1 + edge_bonus)
                 bets.append({"entry": e, "type": "btts", "match_key": match_key,
                     "label": "Ambos Marcan", "prob": btts,
-                    "score": leg_score, "leg_score": leg_score,
+                    "leg_score": leg_score,
                     "fair_odds": round(100 / btts, 2),
-                    "edge": edge_bonus, "edge_bonus": edge_bonus,
+                    "edge_bonus": edge_bonus,
                     "league": league, "match_date": date_s})
 
     bets.sort(key=lambda b: b["leg_score"], reverse=True)
@@ -185,8 +186,6 @@ def _exhaustive_search(pool: list[dict], n_legs: int, min_combined_prob: float) 
     Integrar corrPenalty en la selección evita apilar piernas de la misma liga/día.
     Pool capped at 15 entries (C(15,5) = 3003 max combos).
     """
-    from itertools import combinations
-
     if len(pool) < n_legs:
         return None
 
@@ -246,9 +245,7 @@ def _build_parlays(all_data: dict, vbs: list[dict]) -> list[tuple]:
     V2 Parlay Engine — mirrors getSuggestedParlays() in index.html.
 
     Uses exhaustive search over candidate pools to maximise:
-      parlayEV = product(prob_i) * product(fairOdds_i) * correlationPenalty
-
-    Each leg scored by: legScore = stars^2 * prob * (1 + edge_bonus)
+      combinedScore = product(prob_i) * correlationPenalty
 
     Returns list of (title, emoji, bets_list).
     """

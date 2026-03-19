@@ -2153,26 +2153,29 @@ function calcBestBets() {
 function getSuggestedParlays(bets) {
   // ── V2 Parlay Engine ──
   // Optimised combinada selection using composite leg scoring,
-  // exhaustive/greedy EV search, and correlation penalty.
+  // exhaustive search, and correlation penalty.
   //
-  // legScore = stars^2 * prob * (1 + edge_bonus)
-  // parlayEV = product(prob_i) * product(fairOdds_i) * correlationPenalty
-  // correlationPenalty: same league + same day -> 0.92 per correlated pair
+  // legScore        = stars^2 * prob * (1 + edge_bonus)
+  // combinedScore   = product(prob_i) * correlationPenalty
+  // correlationPenalty: same league + same day -> 0.96 per pair
 
   // ── 1. Build enriched bet pool from calcBestBets + value bets ──
-  // Enrich each bet with edge_bonus from valueBets if available
-  function enrichBets(rawBets) {
-    // Build edge lookup: matchKey|outcome -> best edge (%)
-    const edgeMap = new Map();
+  // edgeMap computed once per page load (ALL_MATCHES never changes after load)
+  if (!getSuggestedParlays._edgeMap) {
+    const em = new Map();
     ALL_MATCHES.forEach(m => {
       if (!m.valueBets || !m.valueBets.length) return;
       const mk = m.date + '|' + (m.home || m.homeShort);
       m.valueBets.forEach(vb => {
         const k = mk + '|' + vb.outcome;
-        const prev = edgeMap.get(k) || 0;
-        if (vb.edge > prev) edgeMap.set(k, vb.edge);
+        if (vb.edge > (em.get(k) || 0)) em.set(k, vb.edge);
       });
     });
+    getSuggestedParlays._edgeMap = em;
+  }
+  const _edgeMap = getSuggestedParlays._edgeMap;
+
+  function enrichBets(rawBets) {
 
     return rawBets.map(b => {
       const mk = b.match.date + '|' + (b.match.home || b.match.homeShort);
@@ -2183,7 +2186,7 @@ function getSuggestedParlays(bets) {
       } else {
         outcomeKey = b.type; // 'over25' or 'btts'
       }
-      const edgePct = edgeMap.get(mk + '|' + outcomeKey) || 0;
+      const edgePct = _edgeMap.get(mk + '|' + outcomeKey) || 0;
       const edgeBonus = edgePct / 100; // edge is in % in predictions.js (e.g. 8.5 -> 0.085)
       const legScore = b.match.stars * b.match.stars * b.prob * (1 + edgeBonus);
       const fairOdds = b.fairOdds || (b.prob > 0 ? parseFloat((100 / b.prob).toFixed(2)) : null);
@@ -2268,13 +2271,10 @@ function getSuggestedParlays(bets) {
     const combinedProb  = legs.reduce((p, b) => p * b.prob / 100, 1) * 100;
     const hasOdds       = legs.every(b => b.fairOdds != null && !isNaN(parseFloat(b.fairOdds)));
     const combinedOdds  = hasOdds ? legs.reduce((o, b) => o * parseFloat(b.fairOdds), 1) : null;
-    const cp = corrPenalty(legs);
-    const evScore       = hasOdds ? (combinedProb / 100 * combinedOdds * cp) : null;
     return { title, riskLevel, legs,
              combinedProb: combinedProb.toFixed(1),
              combinedOdds: combinedOdds ? combinedOdds.toFixed(2) : null,
-             correlationPenalty: cp,
-             ev: evScore };
+             correlationPenalty: corrPenalty(legs) };
   }
 
   // ── 7. Main logic: generate 4 parlays ──
@@ -2520,7 +2520,7 @@ function renderBestBetsView(bets) {
   if (parlays.length > 0) {
     parlayHtml = `
       <div class="bb-section">
-        <div class="bb-section-title">Combinadas Recomendadas — de mas segura a mas arriesgada (EV optimizado)</div>
+        <div class="bb-section-title">Combinadas Recomendadas — de mas segura a mas arriesgada (prob. acumulada optimizada)</div>
         ${parlays.map(renderParlayBox).join('')}
       </div>`;
   }
