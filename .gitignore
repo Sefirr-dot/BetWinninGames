@@ -21,6 +21,11 @@ visualizador/data/results.js
 backtest_*.txt
 predicciones_*.txt
 
+# ── Web app (Vite + React) ───────────────────────────────────────────────────
+web/node_modules/
+web/dist/
+visualizador/app/
+
 # ── Logs ─────────────────────────────────────────────────────────────────────
 logs/
 *.log
