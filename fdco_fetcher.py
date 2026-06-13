@@ -540,3 +540,128 @@ def augment_historical(
     combined = fdco_matches + fd_matches
     combined.sort(key=lambda m: m.get("utcDate", ""))
     return combined
+
+
+# ---------------------------------------------------------------------------
+# Odds enrichment (attach market odds to existing matches, e.g. 2023+ fd.org)
+# ---------------------------------------------------------------------------
+
+def _name_sim(a: str, b: str) -> float:
+    """Token-aware name similarity in [0,1]; 1.0 when one token set ⊆ the other."""
+    if a == b:
+        return 1.0
+    ta, tb = set(a.split()), set(b.split())
+    if ta and tb and (ta <= tb or tb <= ta):
+        return 1.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _fdco_season_for(date_str: str) -> int | None:
+    """Map YYYY-MM-DD to its fdco season year (Aug–Jul span: month>=7 → year)."""
+    try:
+        y, mth = int(date_str[:4]), int(date_str[5:7])
+    except (ValueError, TypeError):
+        return None
+    return y if mth >= 7 else y - 1
+
+
+def enrich_with_odds(
+    matches: list[dict],
+    league_filter: str | None = None,
+) -> list[dict]:
+    """
+    Attach market odds (_bk_h/_bk_d/_bk_a + _bk_source) to matches that lack them
+    by matching against football-data.co.uk CSVs for the seasons they span.
+
+    Unlike augment_historical (which *adds* 2020-2022 fdco rows as new matches),
+    this *enriches* the matches already present — e.g. 2023+ from football-data.org,
+    which carries no odds — so the backtest can compute value-bet ROI at market odds.
+
+    Matching key: (date ±1 day, final score) with team-name similarity as the
+    tiebreak. Score+date is language-agnostic and sidesteps the name-format gap
+    between the two sources (full names vs abbreviations, accents) that defeats
+    pure fuzzy matching for PD/FL1. Matches already carrying _bk_* are skipped.
+    Prefers Pinnacle (sharpest line), falls back to B365.
+
+    Mutates and returns `matches`; prints a coverage summary.
+    """
+    from collections import defaultdict
+    from datetime import datetime, timedelta
+
+    leagues = (
+        [league_filter] if league_filter and league_filter in _FDCO_LEAGUE_CODES
+        else list(_FDCO_LEAGUE_CODES)
+    )
+
+    # Which (league, season) pairs do the odds-less matches span?
+    need: dict[str, set[int]] = defaultdict(set)
+    for m in matches:
+        if m.get("_bk_h"):
+            continue
+        lg = m.get("_league_code")
+        if lg not in leagues:
+            continue
+        season = _fdco_season_for(m.get("utcDate", "")[:10])
+        if season is not None:
+            need[lg].add(season)
+    if not need:
+        return matches
+
+    # Per-league date index of fdco rows that carry odds
+    index: dict[str, dict[str, list[dict]]] = {}
+    for lg, seasons in need.items():
+        by_date: dict[str, list[dict]] = defaultdict(list)
+        for season in sorted(seasons):
+            for r in fetch_season(lg, season):
+                if r.get("psh") or r.get("b365_h"):
+                    by_date[r["match_date"]].append(r)
+        index[lg] = by_date
+
+    matched = eligible = 0
+    for m in matches:
+        if m.get("_bk_h"):
+            continue
+        lg = m.get("_league_code")
+        if lg not in index:
+            continue
+        sc = (m.get("score") or {}).get("fullTime") or {}
+        hg, ag = sc.get("home"), sc.get("away")
+        d = m.get("utcDate", "")[:10]
+        if hg is None or ag is None or not d:
+            continue
+        eligible += 1
+        h = _norm(m.get("homeTeam", {}).get("name", ""))
+        a = _norm(m.get("awayTeam", {}).get("name", ""))
+        try:
+            base = datetime.strptime(d, "%Y-%m-%d")
+        except ValueError:
+            continue
+
+        cands = []
+        for off in (0, -1, 1):
+            dd = (base + timedelta(days=off)).strftime("%Y-%m-%d")
+            for r in index[lg].get(dd, []):
+                if r["home_goals"] == hg and r["away_goals"] == ag:
+                    cands.append(r)
+        if not cands:
+            continue
+
+        best = max(cands, key=lambda r: _name_sim(h, _norm(r["home_name"]))
+                                       + _name_sim(a, _norm(r["away_name"])))
+        # plausibility floor — never accept a same-score row whose names disagree
+        if (_name_sim(h, _norm(best["home_name"])) < 0.4
+                and _name_sim(a, _norm(best["away_name"])) < 0.4):
+            continue
+
+        if best.get("psh"):
+            m["_bk_h"], m["_bk_d"], m["_bk_a"] = best["psh"], best["psd"], best["psa"]
+            m["_bk_source"] = "Pinnacle"
+        else:
+            m["_bk_h"], m["_bk_d"], m["_bk_a"] = best["b365_h"], best["b365_d"], best["b365_a"]
+            m["_bk_source"] = "B365"
+        matched += 1
+
+    if eligible:
+        print(f"    [fdco] Cuotas de mercado añadidas a {matched}/{eligible} "
+              f"partidos ({matched / eligible * 100:.0f}%).")
+    return matches

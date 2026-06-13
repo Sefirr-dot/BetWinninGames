@@ -97,7 +97,7 @@ All keys live in `config.py` (gitignored — copy from `config.example.py`):
 ### Data flow (main.py)
 
 1. **Fetch historical** — `fetcher.py` loads past seasons from football-data.org/v4. Cached indefinitely in `cache/football_data.db`.
-2. **Augment** — `fdco_fetcher.augment_historical()` appends seasons 2020–2022 from football-data.co.uk CSVs. Also parses referee names (`_referee`), corner counts (`_hc`/`_ac`/`_total_corners`) and yellow cards (`_home_yellow`/`_away_yellow`).
+2. **Augment** — `fdco_fetcher.augment_historical()` appends seasons 2020–2022 from football-data.co.uk CSVs. Also parses referee names (`_referee`), corner counts (`_hc`/`_ac`/`_total_corners`) and yellow cards (`_home_yellow`/`_away_yellow`). `fdco_fetcher.enrich_with_odds()` then attaches market odds (`_bk_h`/`_bk_d`/`_bk_a`, Pinnacle→B365) to odds-less 2023+ matches by matching them against the same-season fdco CSVs on **(date ±1 day, final score)** with name similarity as tiebreak — used by the backtest to compute value-bet ROI at real odds.
 3. **Enrich with xG** — `understat_fetcher.enrich_with_xg()` adds `_xg_home`/`_xg_away`. Cached in `cache/understat_xg.db`.
 4. **Fit models** — `dixon_coles.fit_per_league()` + `elo.build_ratings()` + `elo.build_split_ratings()`.
 5. **Fetch odds** — `odds_fetcher.fetch_window()` writes `odds/YYYY-MM-DD.csv` and saves snapshots to `cache/odds_history.db` for movement tracking. Auto force-refreshes (near-closing snapshot) when run after 12:00 UTC on a match day. `odds_fetcher.fetch_pinnacle_snapshots()` also fetches Pinnacle-specific odds to `cache/pinnacle/YYYY-MM-DD.csv` as sharp-line CLV reference.
@@ -310,6 +310,17 @@ Per league: PL=+1.7%, PD=+0.1%, BL1=−3.4%, FL1=+0.3%.
 **≥3★ picks (fair-odds ROI from the seeded DB — sanity/calibration check, not profit):**
 PL: n=684, acc=67.3%, ROI=+1.1% · PD: n=645, acc=68.8%, ROI=+4.5%
 BL1: n=535, acc=66.5%, ROI=+0.0% · FL1: n=546, acc=63.7%, ROI=−1.8%
+
+**Value-bet ROI at REAL market odds (Pinnacle/B365 from fdco, the only number that
+reflects betting profit) — 2026-06-13, the definitive result:**
+Global **−6.7%** (n=1570). PL +0.2% · PD −6.5% · BL1 −11.8% · FL1 −9.9%.
+Higher model edge → *worse* ROI (edge≥5% −6.4%, ≥10% −7.8%, ≥15% −15.9%): the textbook
+signature of a model with **no real edge over the market**. No star/edge/league subset is
+robustly profitable (the few positive pockets are n<55 noise). **Conclusion: the system
+does not beat the closing line — it is well-calibrated (≈ as good as the market), which
+means it cannot profit betting against sharp books after their margin.** Market odds are
+attached by `fdco_fetcher.enrich_with_odds()` (matches by date+score, see its docstring)
+and persisted to the seeded DB as `market_odds` (best_outcome).
 
 Contrast with the old contaminated figures (PL +19.7%, PD +22.4%, BL1 +18.5%, FL1 +10.2%)
 to see the magnitude of the leak: it inflated ROI ~15–20pp and accuracy ~3–4pp, and roughly

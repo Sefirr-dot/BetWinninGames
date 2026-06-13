@@ -645,7 +645,22 @@ def seed_picks_db(results: list[dict], db_path: str = PICKS_DB) -> int:
         match_date = match.get("utcDate", "")[:10]
         wrapped = {"match_info": match, "prediction": r["prediction"]}
 
-        n = db_picks.save_picks([wrapped], match_date, run_ts, db_path, source="backtest")
+        # Persist market odds for the predicted outcome (from fdco _bk_*), so the
+        # seeded DB can yield per-stars value-bet ROI at real bookmaker odds.
+        vbs = None
+        bo = r["prediction"].get("best_outcome")
+        bk = {"home": match.get("_bk_h"), "draw": match.get("_bk_d"),
+              "away": match.get("_bk_a")}.get(bo)
+        if bk:
+            vbs = [{
+                "home_name": match.get("homeTeam", {}).get("name", ""),
+                "away_name": match.get("awayTeam", {}).get("name", ""),
+                "outcome":   bo,
+                "bk_odds":   bk,
+            }]
+
+        n = db_picks.save_picks([wrapped], match_date, run_ts, db_path,
+                                value_bets=vbs, source="backtest")
         total += n
 
         # Only write the result for rows we just inserted — never overwrite
@@ -778,6 +793,8 @@ def _run_league(league: str, seasons: list[int], min_train: int, batch_size: int
         return []
     print(f"  {len(matches)} partidos cargados — augmenting fdco...")
     matches = fdco_fetcher.augment_historical(matches, league)
+    # Attach market odds (Pinnacle/B365) to 2023+ matches so vb_roi is computable
+    matches = fdco_fetcher.enrich_with_odds(matches, league)
     print(f"  {len(matches)} total tras augment — enriqueciendo con xG...")
     understat_fetcher.enrich_with_xg(matches)
     print(f"  Walk-forward {league}...\n")
