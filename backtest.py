@@ -82,6 +82,34 @@ def _actual_btts(match: dict) -> bool:
 # Walk-forward engine
 # ---------------------------------------------------------------------------
 
+def _disable_posthoc_models() -> None:
+    """
+    Neutralise the global post-hoc models that ensemble.py loads at import time.
+
+    LEAKAGE GUARD — critical for leak-free seeds. ensemble.py loads
+    cache/{draw_model,over25_model,calibrator}.json and meta_learner.pkl into
+    module globals at import. Those models are trained on the FULL dataset, so
+    if they are present in cache from a previous run they would be applied to
+    every walk-forward fold — leaking future folds into early-fold predictions.
+    The draw_model in particular *replaces* the blended draw probability, which
+    re-normalises ph/pa and changes best_outcome/best_prob → contaminating the
+    per-stars ROI baseline. (Symptom: stored prob_draw std collapses from the
+    natural ~0.050 to ~0.009.)
+
+    Models are only fit per fold inside run_backtest; the draw/over25 pretrain
+    runs at the END of main() on the (now clean) results, so disabling them here
+    has no effect on the models written for live use.
+    """
+    disabled = []
+    for attr in ("_draw_weights", "_over25_weights", "_calib_params", "_ml_model"):
+        if getattr(ensemble, attr, None) is not None:
+            setattr(ensemble, attr, None)
+            disabled.append(attr)
+    if disabled:
+        print(f"  [leakage-guard] Modelos post-hoc desactivados para el walk-forward: "
+              f"{', '.join(disabled)}")
+
+
 def run_backtest(
     matches: list[dict],
     min_train: int = BACKTEST_MIN_TRAIN,
@@ -95,9 +123,12 @@ def run_backtest(
         test  = matches[train_end : train_end + batch_size]
 
     Models are re-fitted per fold; test matches never appear in training data.
+    Post-hoc global models (draw/over25/calibrator/meta) are disabled first to
+    keep folds leak-free regardless of cache state — see _disable_posthoc_models.
 
     Returns a list of result dicts, one per successfully predicted match.
     """
+    _disable_posthoc_models()
     results = []
     train_end = min_train
     fold = 0
@@ -578,12 +609,30 @@ def seed_picks_db(results: list[dict], db_path: str = PICKS_DB) -> int:
     """
     Insert walk-forward backtest results into picks_history.db as resolved picks.
 
-    Each result is saved via INSERT OR IGNORE (safe to re-run), then immediately
-    marked as resolved with the actual match outcome.  Picks that already exist
-    in the DB (e.g. from real main.py runs) are left untouched.
+    REFRESH semantics: existing `source='backtest'` rows are deleted first, so a
+    reseed actually replaces stale/contaminated seeds instead of being silently
+    ignored. Without this, INSERT OR IGNORE skips every row whose match_id already
+    exists (md5 ids are deterministic), leaving old predictions in place even
+    though the walk-forward just recomputed them. Live picks (`source='live'`)
+    are never touched.
+
+    Each result is then saved via INSERT OR IGNORE and marked resolved with the
+    actual outcome.
 
     Returns the number of new rows inserted.
     """
+    import sqlite3
+
+    db_picks.init_db(db_path)
+    _conn = sqlite3.connect(db_path)
+    try:
+        n_del = _conn.execute("DELETE FROM picks WHERE source='backtest'").rowcount
+        _conn.commit()
+    finally:
+        _conn.close()
+    if n_del:
+        print(f"  [seed] {n_del} semillas backtest antiguas eliminadas (refresh limpio)")
+
     run_ts = datetime.now().isoformat()
     total = 0
 
@@ -854,8 +903,10 @@ def main():
         n_seeded = seed_picks_db(all_results)
         print(f"  {n_seeded} picks nuevos insertados en {PICKS_DB}")
 
+        # real_only: el meta-learner nunca debe entrenarse con seeds de backtest
+        # (distribution shift respecto a la temporada actual — ver CLAUDE.md)
         from algorithms import meta_learner
-        ml_result = meta_learner.train(PICKS_DB)
+        ml_result = meta_learner.train(PICKS_DB, real_only=True)
         if "error" in ml_result:
             print(f"  Meta-learner: {ml_result['error']}")
         else:
