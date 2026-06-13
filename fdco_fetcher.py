@@ -29,6 +29,7 @@ strength), but their direct form/H2H records won't link to predictions.
 """
 
 import csv
+import hashlib
 import io
 import os
 import sqlite3
@@ -136,9 +137,15 @@ def _fuzzy(target: str, candidates: list[str], threshold: float = 0.72) -> str |
 
 
 def _synthetic_id(league: str, name: str) -> int:
-    """Deterministic negative ID for teams not found in the fd.org registry."""
+    """Deterministic negative ID for teams not found in the fd.org registry.
+
+    Uses md5 instead of built-in hash() — str hashing is randomized per
+    process (PYTHONHASHSEED), which made these IDs change on every run and
+    caused duplicate seed rows in picks_history.db across --seed-db runs.
+    """
     key = f"fdco:{league}:{_norm(name)}"
-    return -(abs(hash(key)) % 900_000 + 100_001)
+    digest = int(hashlib.md5(key.encode("utf-8")).hexdigest()[:12], 16)
+    return -(digest % 900_000 + 100_001)
 
 
 # ---------------------------------------------------------------------------

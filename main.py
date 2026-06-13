@@ -29,7 +29,8 @@ import telegram_notifier
 import understat_fetcher
 from algorithms import dixon_coles, elo as elo_module, ensemble, value_detector
 from reporter import generate_js
-from config import LEAGUES, API_KEY, PICKS_DB, AI_ADVISOR_ENABLED, AI_ADVISOR_MIN_STARS
+from config import (LEAGUES, API_KEY, PICKS_DB, AI_ADVISOR_ENABLED,
+                    AI_ADVISOR_MIN_STARS, MIN_STARS_SAVE)
 
 
 def parse_args():
@@ -389,8 +390,14 @@ def main():
         run_ts = datetime.now(timezone.utc).isoformat()
         total_saved = 0
         for date_str, day_data in all_data.items():
+            # Solo se trackean picks con confianza real (>=MIN_STARS_SAVE):
+            # los de 1-2 estrellas aciertan ~40% y solo ensucian las metricas.
+            trackable = [
+                p for p in day_data["predictions"]
+                if p.get("prediction", p).get("stars", 0) >= MIN_STARS_SAVE
+            ]
             saved = db_picks.save_picks(
-                day_data["predictions"],
+                trackable,
                 date_str,
                 run_ts,
                 PICKS_DB,

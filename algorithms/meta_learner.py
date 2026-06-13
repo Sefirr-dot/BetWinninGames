@@ -53,7 +53,7 @@ except ImportError:
     _XGB_AVAILABLE = False
 
 _MODEL_PATH  = "cache/meta_learner.pkl"
-_MIN_SAMPLES = 200
+_MIN_SAMPLES = 500  # XGBoost overfits badly below this; raised from 200
 
 FEATURE_NAMES = [
     "dc_ph", "dc_pd", "dc_pa",

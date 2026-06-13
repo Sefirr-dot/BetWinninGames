@@ -36,7 +36,7 @@ from scipy.optimize import minimize
 from scipy.special import expit
 
 DRAW_MODEL_PATH = "cache/draw_model.json"
-DRAW_MODEL_MIN_SAMPLES = 200  # 200 live picks required for stable coefficient estimation
+DRAW_MODEL_MIN_SAMPLES = 500  # live retrain overwrites a ~10k-sample backtest pretrain — demand real volume first
 
 
 # ---------------------------------------------------------------------------

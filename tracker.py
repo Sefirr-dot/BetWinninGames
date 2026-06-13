@@ -901,18 +901,25 @@ def run_tracker(quiet: bool = False, no_update: bool = False, no_report: bool = 
         update_results(db_path=PICKS_DB, quiet=quiet)
 
     # 2. Load all picks and compute metrics
+    # Analytics (TRACK view, tracker_metrics.json, drift, calibrator) use LIVE
+    # picks only — backtest seeds come from older seasons in bulk and poison
+    # per-league ROI (dynamic Kelly), the Platt calibrator and the KS drift
+    # baseline. Seeds remain in the DB solely as training data for the weight
+    # optimizer and the draw/over25 pretrain.
     all_picks  = db_picks.get_all_picks(PICKS_DB)
     resolved   = [p for p in all_picks if p["actual_result"] is not None]
-    pending    = [p for p in all_picks if p["actual_result"] is None]
+    live_picks    = [p for p in all_picks if p.get("source") == "live"]
+    resolved_live = [p for p in live_picks if p["actual_result"] is not None]
+    pending_live  = [p for p in live_picks if p["actual_result"] is None]
 
     metrics = None
-    if resolved:
-        metrics = compute_metrics(resolved)
-        metrics["n_pending"] = len(pending)
-        metrics["n_total"]   = len(all_picks)
+    if resolved_live:
+        metrics = compute_metrics(resolved_live)
+        metrics["n_pending"] = len(pending_live)
+        metrics["n_total"]   = len(live_picks)
 
         # PSI drift detection
-        psi = compute_psi(resolved)
+        psi = compute_psi(resolved_live)
         metrics["psi"] = psi
         if psi.get("drift_detected"):
             _alert_psi_drift(psi)
@@ -920,16 +927,16 @@ def run_tracker(quiet: bool = False, no_update: bool = False, no_report: bool = 
             print(f"  [tracker] PSI={psi['psi_max']:.3f} (drift: no)")
 
         # Bet timing analysis
-        metrics["timing_analysis"] = compute_timing_analysis(resolved)
+        metrics["timing_analysis"] = compute_timing_analysis(resolved_live)
 
         # Sub-model accuracy (rolling window)
-        metrics["submodel_accuracy_30"] = compute_submodel_accuracy(resolved)
+        metrics["submodel_accuracy_30"] = compute_submodel_accuracy(resolved_live)
 
     # 3. Maybe update calibrator, optimise weights, train meta-learner, draw model
     if resolved:
-        maybe_fit_calibrator(resolved)
+        maybe_fit_calibrator(resolved_live)
         maybe_optimize_weights(resolved)
-        maybe_train_meta_learner(resolved)
+        maybe_train_meta_learner(resolved_live)
         try:
             from algorithms.draw_model import train as _train_draw
             _draw_result = _train_draw(PICKS_DB)
@@ -953,12 +960,13 @@ def run_tracker(quiet: bool = False, no_update: bool = False, no_report: bool = 
         _save_metrics_json(metrics)
 
     # 5. Generate tracker_data.js + results.js (for frontend bet auto-settlement)
+    # Only live picks are exported — seeds would bloat tracker_data.js to >30 MB.
     if not no_report:
-        path = generate_tracker_js(all_picks, metrics)
+        path = generate_tracker_js(live_picks, metrics)
         _save_results_js(all_picks)
         if not quiet:
             print(f"  [tracker] {path} generado "
-                  f"({len(resolved)} resueltos · {len(pending)} pendientes).")
+                  f"({len(resolved_live)} resueltos · {len(pending_live)} pendientes).")
 
 
 def main():
