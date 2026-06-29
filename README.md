@@ -87,6 +87,17 @@ run_visualizer.bat    # starts Python HTTP server on :8080, opens browser
 | **📈 Backtest** | Walk-forward backtest results by fold and league |
 | **🇪🇸 Quiniela** | Best pick per La Liga match + one-click add to bankroll |
 
+### Screenshots
+
+**Top Picks** — best picks by category with suggested parlays (Double / Triple / Quad):
+
+![Top Picks view](docs/screenshot-top-picks.png)
+
+**Performance** — model accuracy, ROI by stars and by match context (note the honestly
+negative real ROIs — this project is well-calibrated but has no demonstrated betting edge):
+
+![Performance view](docs/screenshot-performance.png)
+
 ### Bankroll tracker
 
 - Set your initial bankroll once on first visit (stored in `localStorage`, never uploaded)
