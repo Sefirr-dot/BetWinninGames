@@ -2,6 +2,10 @@
 
 A statistical football prediction engine for the top 4 European leagues (Premier League, La Liga, Bundesliga, Ligue 1), built around Dixon-Coles Poisson modelling, Elo ratings, and a suite of calibrated secondary models. Includes a full browser-based visualizer with bankroll tracking, bet slip, and AI-assisted risk analysis via local Ollama.
 
+> **Honest disclaimer:** this is a technical / educational project. It is well-calibrated but
+> has **no demonstrated edge over the market** — see [Project status](#project-status--honest-results-read-this).
+> Not investment advice.
+
 ---
 
 ## Prerequisites
@@ -148,17 +152,39 @@ Each `tracker.py` run automatically retrains calibration models as more resolved
 
 ---
 
-## Backtest baseline (2023 + 2024 seasons, 6,595 matches)
+## Backtest baseline (2023 + 2024 + 2025 seasons, 7,954 matches — leak-free reseed)
 
 | League | Accuracy | ROI at fair odds |
 |---|---|---|
-| Premier League | 54.0% | −1.7% |
-| La Liga | 51.9% | −1.3% |
-| Bundesliga | 50.9% | −6.5% |
-| Ligue 1 | 50.3% | −2.7% |
-| **Global** | **51.8%** | **−2.9%** |
+| Premier League | — | +1.7% |
+| La Liga | — | +0.1% |
+| Bundesliga | — | −3.4% |
+| Ligue 1 | — | +0.3% |
+| **Global** | **52.1%** | **−0.2%** |
 
-ROI is negative at fair odds by design — the real edge comes from value bets placed at bookmaker odds above the model's fair price.
+ROI at *fair* odds sits near zero by design — a calibrated model scores ROI≈0 at fair
+odds. Real profit would have to come from value bets at *market* odds, where you must beat
+the bookmaker margin.
+
+## Project status — honest results (read this)
+
+**This is a technical / educational project. It does not have a demonstrated betting edge.**
+
+Measured at **real market odds** (Pinnacle/B365), value-bet ROI is **−6.7%** (n=1570), and
+*higher* model edge correlates with *worse* ROI — the textbook signature of a model that is
+well-calibrated but has **no real edge over the market**. In plain terms: the system is
+roughly as good as the closing line, which means it cannot profit after the bookmaker's
+margin.
+
+An alternative **+EV vs Pinnacle** approach (`ev_detector.py`, treating Pinnacle's no-vig
+line as truth instead of the model) was probed and settled against real results: the
+expected +4–6% edge came out **−13% realised ROI** — same dead end, driven by
+favourite-longshot bias in proportional margin removal. See the *+EV vs Pinnacle probe* note
+in `CLAUDE.md`.
+
+**Betting is shelved.** The value here is the engineering — Dixon-Coles/Elo ensemble,
+leak-free walk-forward backtesting, CLV tracking, calibration, and the React frontend — not
+a money printer. Treat any "value bet" output as a modelling exercise, not investment advice.
 
 ---
 
