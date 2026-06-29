@@ -326,6 +326,24 @@ Contrast with the old contaminated figures (PL +19.7%, PD +22.4%, BL1 +18.5%, FL
 to see the magnitude of the leak: it inflated ROI ~15–20pp and accuracy ~3–4pp, and roughly
 halved the ≥3★ count (the leaked draw model distorted the confidence distribution).
 
+### +EV vs Pinnacle probe — `ev_detector.py` (2026-06-29, dead end)
+
+A viability probe for pivoting away from the in-house ensemble toward **+EV soft-book
+betting** (Pinnacle no-vig line as truth instead of our model, which can't beat the close).
+`ev_detector.py` (repo root) reuses `odds_fetcher.get_pinnacle_implied()` + `value_detector`
+name-matching: for each match it compares the best soft-book price in `odds/*.csv` against
+Pinnacle's margin-removed implied prob, flagging `EV = p_true·best_odds − 1`. Skips rows
+whose best price IS Pinnacle. No new API calls — runs on existing CSVs + `cache/pinnacle/`.
+**Settled against `results.js` (108 matches, mar–apr 2026):** all +EV → ROI **−13.3%**;
+"realistic" filtered subset (odds≤4, soft books, EV 2–15%, n=18) → −5.3%; only positive
+pocket was draws (n=9, +18%) = noise. **The expected +4–6% EV settled NEGATIVE — same dead
+end as the model.** Root cause: `get_pinnacle_implied()` strips margin *proportionally*,
+which inflates longshot probabilities (favourite-longshot bias) → fabricates fake +EV on
+high odds, exactly the bets that lose (24% hit rate). Conclusion: **betting is shelved.** If
+ever revisited, switch the no-vig to power/Shin method, restrict to liquid odds (1.5–3.5),
+and get far more volume before trusting any ROI. Kept as a guard against re-running the
+mirage; the operational wall (account limiting) remains unaddressed regardless.
+
 Per-stars ROI can be derived directly from the seeds without re-running backtest:
 `SELECT league, stars, COUNT(*), AVG(best_outcome=actual_result), ... FROM picks WHERE source='backtest'`.
 
